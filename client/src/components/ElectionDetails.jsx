@@ -244,6 +244,8 @@ export default function ElectionDetails({
             </button>
           )}
 
+          
+
           {election.status === 'draft' && (
             <button
               className="btn-primary"

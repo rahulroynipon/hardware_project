@@ -15,18 +15,23 @@ class ArduinoSerialBridge {
     this.onResetCallback = null;
     this.onStatusCallback = null;
     this.onConnectCallback = null;
+    this.onInspectCallback = null;
   }
 
-  setCallbacks({ onVote, onStart, onPublish, onReset, onStatus, onConnect }) {
+  setCallbacks({ onVote, onStart, onPublish, onReset, onStatus, onConnect, onInspect }) {
     this.onVoteCallback = onVote;
     this.onStartCallback = onStart;
     this.onPublishCallback = onPublish;
     this.onResetCallback = onReset;
     this.onStatusCallback = onStatus;
     this.onConnectCallback = onConnect;
+    this.onInspectCallback = onInspect;
   }
 
   async connect() {
+    if (this.isConnected && this.port && this.port.isOpen) {
+      return;
+    }
     this.isManualDisconnect = false;
     try {
       const ports = await SerialPort.list();
@@ -41,7 +46,8 @@ class ArduinoSerialBridge {
       this.port = new SerialPort({
         path: targetPath,
         baudRate: this.baudRate,
-        autoOpen: false
+        autoOpen: false,
+        hupcl: false
       });
 
       this.port.open((err) => {
@@ -135,12 +141,15 @@ class ArduinoSerialBridge {
         if (this.onVoteCallback) this.onVoteCallback(cand);
       } else if (event === 'REMOTE_VOTE') {
         console.log(`[ARDUINO ACK] Simulated vote recorded on Arduino LCD for Candidate ${cand}`);
+      } else if (event === 'INSPECT' || event === 'PAGE') {
+        if (this.onInspectCallback) this.onInspectCallback(cand);
       } else if (event === 'START') {
         if (parts[parts.length - 1] === 'MachineReady') {
           console.log('[ARDUINO] Arduino boot completed. Synchronizing state...');
           if (this.onConnectCallback) {
             try { this.onConnectCallback(); } catch (e) { console.error('[ONCONNECT ERROR]', e); }
           }
+          return;
         }
         if (this.onStartCallback) this.onStartCallback();
       } else if (event === 'RESULT') {

@@ -254,26 +254,74 @@ arduinoBridge.setCallbacks({
   },
   onReset: async () => {
     console.log('[HARDWARE EVENT] Pin 7 Reset (3s) triggered on Arduino.');
-    broadcast('HARDWARE_EVENT', { action: 'RESET', message: 'Hardware tallies reset' });
+    try {
+      await pool.query("UPDATE elections SET status = 'completed' WHERE status = 'live';");
+    } catch (e) {
+      console.error('[RESET DB ERR]', e);
+    }
+    broadcast('HARDWARE_EVENT', { action: 'RESET', message: 'Machine reset to Standby' });
+  },
+  onInspect: (cand) => {
+    let slot = String(cand || '').toUpperCase().trim();
+    if (slot === 'W' || slot === '5') slot = 'WINNER';
+    else if (slot === 'T' || slot === '0') slot = 'TOTAL';
+    else if (slot === '1') slot = 'A';
+    else if (slot === '2') slot = 'B';
+    else if (slot === '3') slot = 'C';
+    else if (slot === '4') slot = 'D';
+
+    console.log(`[HARDWARE EVENT] LCD displayed slot ${slot} (raw: ${cand}) on Arduino.`);
+    broadcast('HARDWARE_EVENT', {
+      action: 'INSPECT',
+      slot,
+      rawSlot: cand,
+      message: `${slot === 'WINNER' ? 'Winner' : slot === 'TOTAL' ? 'Total votes' : `Candidate ${slot}`} displayed on Arduino LCD`
+    });
   },
   onConnect: async () => {
     try {
-      const live = await getLiveElection();
-      if (live && live.candidates && live.candidates.length > 0) {
-        console.log(`[SERIAL SYNC] Auto-syncing Arduino candidate count to ${live.candidates.length} for live election "${live.title}".`);
-        arduinoBridge.setCandidateCount(live.candidates.length);
-        arduinoBridge.startVoting();
+      let targetElection = await getLiveElection();
+      let isPublishedSync = false;
+
+      if (!targetElection) {
+        const { rows } = await pool.query(
+          "SELECT * FROM elections WHERE status = 'published' ORDER BY updated_at DESC, created_at DESC LIMIT 1;"
+        );
+        if (rows.length > 0) {
+          const pub = rows[0];
+          const candRes = await pool.query(
+            "SELECT * FROM candidates WHERE election_id = $1 ORDER BY ballot_order ASC;",
+            [pub.id]
+          );
+          pub.candidates = candRes.rows;
+          targetElection = pub;
+          isPublishedSync = true;
+        }
+      }
+
+      if (targetElection && targetElection.candidates && targetElection.candidates.length > 0) {
+        console.log(`[SERIAL SYNC] Auto-syncing Arduino (${isPublishedSync ? 'PUBLISHED' : 'LIVE'}) "${targetElection.title}"...`);
+        arduinoBridge.setCandidateCount(targetElection.candidates.length);
 
         const tallies = [0, 0, 0, 0];
-        live.candidates.forEach((c) => {
+        targetElection.candidates.forEach((c) => {
           const idx = (c.slot || '').toUpperCase().charCodeAt(0) - 65;
           if (idx >= 0 && idx < 4) {
             tallies[idx] = c.votes || 0;
           }
         });
-        setTimeout(() => {
+
+        if (isPublishedSync) {
           arduinoBridge.syncTallies(tallies);
-        }, 300);
+          setTimeout(() => {
+            arduinoBridge.publishResults();
+          }, 350);
+        } else {
+          arduinoBridge.startVoting();
+          setTimeout(() => {
+            arduinoBridge.syncTallies(tallies);
+          }, 350);
+        }
       }
     } catch (err) {
       console.error('[SERIAL SYNC ERROR]', err);
@@ -621,12 +669,16 @@ app.post('/api/hardware/action', (req, res) => {
       break;
     case 'RESET':
       arduinoBridge.resetMachine();
+      pool.query("UPDATE elections SET status = 'completed' WHERE status = 'live';").catch(console.error);
+      broadcast('HARDWARE_EVENT', { action: 'RESET', message: 'Machine reset to Standby' });
       break;
     case 'POWER_OFF':
       arduinoBridge.powerOff();
+      broadcast('HARDWARE_EVENT', { action: 'POWER_OFF', message: 'Display Sleep' });
       break;
     case 'POWER_ON':
       arduinoBridge.powerOn();
+      broadcast('HARDWARE_EVENT', { action: 'POWER_ON', message: 'Display Wake' });
       break;
     case 'SET_COUNT':
       if (count >= 2 && count <= 4) arduinoBridge.setCandidateCount(count);
@@ -645,6 +697,27 @@ app.post('/api/hardware/action', (req, res) => {
         }
       }).catch(console.error);
       break;
+    case 'SHOW_CANDIDATE': {
+      const slot = (req.body.slot || 'A').toUpperCase();
+      arduinoBridge.send(`SHOW_CANDIDATE:${slot}`);
+      broadcast('HARDWARE_EVENT', { action: 'INSPECT', slot, message: `Candidate ${slot} displayed on Arduino LCD` });
+      break;
+    }
+    case 'SHOW_WINNER': {
+      arduinoBridge.send('SHOW_WINNER');
+      broadcast('HARDWARE_EVENT', { action: 'INSPECT', slot: 'WINNER', message: 'Winner displayed on Arduino LCD' });
+      break;
+    }
+    case 'SHOW_TOTAL': {
+      arduinoBridge.send('SHOW_TOTAL');
+      broadcast('HARDWARE_EVENT', { action: 'INSPECT', slot: 'TOTAL', message: 'Total votes displayed on Arduino LCD' });
+      break;
+    }
+    case 'CYCLE_STATS': {
+      arduinoBridge.send('CYCLE_STATS');
+      broadcast('HARDWARE_EVENT', { action: 'CYCLE_STATS', message: 'Cycled Arduino LCD display page' });
+      break;
+    }
     default:
       return res.status(400).json({ success: false, error: 'Unknown hardware action' });
   }
@@ -664,31 +737,57 @@ app.get('/api/hardware/status', async (req, res) => {
 // 8.5 Sync live election candidates & votes to Arduino LCD
 app.post('/api/hardware/sync', async (req, res) => {
   try {
-    const live = await getLiveElection();
-    if (!live || !live.candidates || live.candidates.length === 0) {
-      return res.status(400).json({ success: false, error: 'No live election currently active to sync.' });
+    let election = await getLiveElection();
+    let isPublishedSync = false;
+
+    if (!election) {
+      const { rows } = await pool.query(
+        "SELECT * FROM elections WHERE status = 'published' ORDER BY updated_at DESC, created_at DESC LIMIT 1;"
+      );
+      if (rows.length > 0) {
+        const pub = rows[0];
+        const candRes = await pool.query(
+          "SELECT * FROM candidates WHERE election_id = $1 ORDER BY ballot_order ASC;",
+          [pub.id]
+        );
+        pub.candidates = candRes.rows;
+        election = pub;
+        isPublishedSync = true;
+      }
+    }
+
+    if (!election || !election.candidates || election.candidates.length === 0) {
+      return res.status(400).json({ success: false, error: 'No live or published election found to sync.' });
     }
 
     const tallies = [0, 0, 0, 0];
-    live.candidates.forEach((c) => {
+    election.candidates.forEach((c) => {
       const idx = (c.slot || '').toUpperCase().charCodeAt(0) - 65;
       if (idx >= 0 && idx < 4) {
         tallies[idx] = c.votes || 0;
       }
     });
 
-    arduinoBridge.setCandidateCount(live.candidates.length);
-    arduinoBridge.startVoting();
-    setTimeout(() => {
+    arduinoBridge.setCandidateCount(election.candidates.length);
+    if (isPublishedSync) {
       arduinoBridge.syncTallies(tallies);
-    }, 250);
+      setTimeout(() => {
+        arduinoBridge.publishResults();
+      }, 250);
+    } else {
+      arduinoBridge.startVoting();
+      setTimeout(() => {
+        arduinoBridge.syncTallies(tallies);
+      }, 250);
+    }
 
-    console.log(`[HARDWARE SYNC] Synced "${live.title}" (${live.candidates.length} candidates, tallies: ${tallies.join(',')}) to Arduino.`);
+    console.log(`[HARDWARE SYNC] Synced (${isPublishedSync ? 'PUBLISHED' : 'LIVE'}) "${election.title}" (${election.candidates.length} candidates, tallies: ${tallies.join(',')}) to Arduino.`);
     res.json({
       success: true,
-      message: `Synchronized "${live.title}" with Arduino display`,
-      election: live.title,
-      candidateCount: live.candidates.length,
+      message: `Synchronized "${election.title}" with Arduino display`,
+      election: election.title,
+      isPublished: isPublishedSync,
+      candidateCount: election.candidates.length,
       tallies: {
         A: tallies[0],
         B: tallies[1],

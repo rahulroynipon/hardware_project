@@ -1,128 +1,511 @@
-import React, { useState } from 'react';
-import { castVote, triggerHardwareAction, flashHardwareFirmware, syncLiveElectionToHardware } from '../services/api';
+import React, { useState, useEffect, useRef } from 'react';
+import { castVote, triggerHardwareAction, syncLiveElectionToHardware } from '../services/api';
 
-export default function HardwareModal({ isOpen, onClose, isHardwareConnected, liveElection, publishedElection }) {
+export default function HardwareModal({
+  isOpen,
+  onClose,
+  isHardwareConnected,
+  liveElection,
+  publishedElection,
+  lastHardwareEvent
+}) {
   const [loadingSlot, setLoadingSlot] = useState(null);
-  const [isFlashing, setIsFlashing] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [feedback, setFeedback] = useState('');
+  const [activeLcdView, setActiveLcdView] = useState('WINNER'); // 'WINNER', 'TOTAL', 'A', 'B', 'C', 'D'
+  const [isPoweredOn, setIsPoweredOn] = useState(true);
+  const [greenBlink, setGreenBlink] = useState(false);
+
+  // Temporary transition screens (800ms - 1500ms duration matching Arduino Uno showMessage)
+  const [tempMessage, setTempMessage] = useState(null);
+  const tempTimerRef = useRef(null);
+
+  function triggerTempMessage(row0, row1, durationMs = 800) {
+    if (tempTimerRef.current) {
+      clearTimeout(tempTimerRef.current);
+    }
+    setTempMessage({ row0, row1 });
+    tempTimerRef.current = setTimeout(() => {
+      setTempMessage(null);
+    }, durationMs);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (tempTimerRef.current) clearTimeout(tempTimerRef.current);
+    };
+  }, []);
+
+  // Machine mode tracks Arduino Uno MachineState: 'STANDBY', 'VOTING', 'PUBLISHED'
+  const [machineMode, setMachineMode] = useState(() => {
+    if (liveElection) return 'VOTING';
+    if (publishedElection) return 'PUBLISHED';
+    return 'STANDBY';
+  });
+
+  // Keep machineMode aligned when props change
+  useEffect(() => {
+    if (liveElection) {
+      setMachineMode('VOTING');
+    } else if (publishedElection) {
+      // If we are in STANDBY from a reset, do not force published unless requested
+      if (machineMode !== 'STANDBY') {
+        setMachineMode('PUBLISHED');
+      }
+    }
+  }, [liveElection, publishedElection]);
+
+  function normalizeSlot(raw) {
+    if (!raw) return 'WINNER';
+    const s = String(raw).toUpperCase().trim();
+    if (s === 'W' || s === '5' || s === 'WINNER') return 'WINNER';
+    if (s === 'T' || s === '0' || s === 'TOTAL') return 'TOTAL';
+    if (s === '1' || s === 'A') return 'A';
+    if (s === '2' || s === 'B') return 'B';
+    if (s === '3' || s === 'C') return 'C';
+    if (s === '4' || s === 'D') return 'D';
+    return s;
+  }
+
+  // Sync state when incoming physical hardware button events occur
+  useEffect(() => {
+    if (!lastHardwareEvent) return;
+
+    const action = lastHardwareEvent.action;
+    if (action === 'VOTE_CAST') {
+      const slot = (lastHardwareEvent.slot || 'A').toUpperCase();
+      setGreenBlink(true);
+      setTimeout(() => setGreenBlink(false), 120);
+      triggerTempMessage('Vote Recorded', `Candidate ${slot}`, 800);
+    } else if (action === 'RESET') {
+      setMachineMode('STANDBY');
+      setIsPoweredOn(true);
+      triggerTempMessage('VOTES RESET', 'Press to Start', 1500);
+    } else if (action === 'START') {
+      setMachineMode('VOTING');
+      setIsPoweredOn(true);
+      triggerTempMessage('VOTING STARTED', 'Cast your vote!', 1200);
+    } else if (action === 'PUBLISH') {
+      setMachineMode('PUBLISHED');
+      setActiveLcdView('WINNER');
+      setIsPoweredOn(true);
+      triggerTempMessage('RESULT PUBLISHED', 'Voting is closed', 1200);
+    } else if (action === 'INSPECT' && lastHardwareEvent.slot) {
+      setMachineMode('PUBLISHED');
+      const slot = normalizeSlot(lastHardwareEvent.slot);
+      setActiveLcdView(slot);
+      setIsPoweredOn(true);
+    } else if (action === 'POWER_OFF') {
+      triggerTempMessage(' POWERING OFF...', '', 800);
+      setTimeout(() => {
+        setIsPoweredOn(false);
+      }, 800);
+    } else if (action === 'POWER_ON') {
+      setIsPoweredOn(true);
+      triggerTempMessage(' POWERING ON... ', '', 1000);
+    }
+  }, [lastHardwareEvent]);
 
   if (!isOpen) return null;
 
-  const isPublished = !liveElection && !!publishedElection;
+  const isStandby = machineMode === 'STANDBY';
+  const isVoting = machineMode === 'VOTING';
+  const isPublished = machineMode === 'PUBLISHED';
+
+  // LED states mirroring Arduino Uno physical pins
+  const isGreenLedLit = isPoweredOn && isVoting;
+  const isRedLedLit = isPoweredOn && isPublished;
+
+  // Calculate LCD lines matching Arduino Uno exact formatting (lines 191-218 of ino)
+  function getLcdLines() {
+    const pad16 = (str) => (str + '                ').substring(0, 16);
+    const pad4 = (num) => {
+      const s = String(num != null ? num : 0);
+      return (s + '    ').substring(0, 4);
+    };
+
+    // 0. Temporary transition screens (matching Arduino Uno showMessage, e.g. "Vote Recorded", "VOTING STARTED")
+    if (tempMessage) {
+      return {
+        row0: pad16(tempMessage.row0),
+        row1: pad16(tempMessage.row1)
+      };
+    }
+
+    // 1. Powered OFF State: completely dark / blank
+    if (!isPoweredOn) {
+      return {
+        row0: pad16(''),
+        row1: pad16('')
+      };
+    }
+
+    // 2. STANDBY State (Matching digital_voting_machine.ino lines 191-197)
+    if (isStandby) {
+      return {
+        row0: pad16('TO START VOTING'),
+        row1: pad16('PRESS TO START')
+      };
+    }
+
+    // 3. VOTING State (Matching digital_voting_machine.ino lines 199-218)
+    if (isVoting) {
+      const candidates = liveElection?.candidates || [];
+      const candCount = candidates.length > 0 ? candidates.length : 4;
+      const getVotes = (slot) => {
+        const c = candidates.find((x) => (x.slot || '').toUpperCase() === slot);
+        return c ? c.votes || 0 : 0;
+      };
+
+      const vA = getVotes('A');
+      const vB = getVotes('B');
+      const vC = getVotes('C');
+      const vD = getVotes('D');
+
+      const row0 = pad16(`A:${pad4(vA)}  B:${pad4(vB)}`);
+
+      let row1 = '';
+      if (candCount === 2) {
+        row1 = pad16('[2 CANDIDATES]');
+      } else if (candCount === 3) {
+        row1 = pad16(`C:${pad4(vC)}  [3 CAND]`);
+      } else {
+        row1 = pad16(`C:${pad4(vC)}  D:${pad4(vD)}`);
+      }
+
+      return { row0, row1 };
+    }
+
+    // 4. PUBLISHED State (Matching digital_voting_machine.ino lines 263-317)
+    if (isPublished) {
+      const candidates = (publishedElection || liveElection)?.candidates || [];
+      const total = candidates.reduce((sum, c) => sum + (c.votes || 0), 0);
+      const candCount = candidates.length > 0 ? candidates.length : 4;
+
+      if (activeLcdView === 'TOTAL') {
+        const totStr = String(total);
+        return {
+          row0: pad16('TOTAL VOTES'),
+          row1: pad16(`Total: ${totStr}`)
+        };
+      }
+
+      if (['A', 'B', 'C', 'D'].includes(activeLcdView)) {
+        const slotIdx = activeLcdView.charCodeAt(0) - 65;
+        if (slotIdx < candCount) {
+          const cand = candidates.find((c) => (c.slot || '').toUpperCase() === activeLcdView);
+          const votes = cand ? cand.votes || 0 : 0;
+          const pct = total > 0 ? ((votes * 100) / total).toFixed(1) : '0.0';
+          return {
+            row0: pad16(`Candidate ${activeLcdView}`),
+            row1: pad16(`V:${pad4(votes)} ${pct}%`)
+          };
+        } else {
+          return {
+            row0: pad16(`Candidate ${activeLcdView}`),
+            row1: pad16('SLOT DISABLED')
+          };
+        }
+      }
+
+      // Default: WINNER screen (Page 5)
+      let highest = 0;
+      let winnerSlot = 'A';
+      let winnerCount = 0;
+
+      candidates.forEach((c) => {
+        const v = c.votes || 0;
+        if (v > highest) {
+          highest = v;
+          winnerSlot = (c.slot || 'A').toUpperCase();
+          winnerCount = 1;
+        } else if (v === highest && highest > 0) {
+          winnerCount++;
+        }
+      });
+
+      if (total === 0) {
+        return {
+          row0: pad16('WINNER: NONE'),
+          row1: pad16('No Votes Cast')
+        };
+      } else if (winnerCount > 1) {
+        return {
+          row0: pad16('WINNER: TIE'),
+          row1: pad16(`Top votes: ${highest}`)
+        };
+      } else {
+        const winnerPct = total > 0 ? Math.round((highest * 100) / total) : 0;
+        return {
+          row0: pad16(`WINNER: Cand ${winnerSlot}`),
+          row1: pad16(`V:${pad4(highest)} (${winnerPct}%)`)
+        };
+      }
+    }
+
+    return {
+      row0: pad16('TO START VOTING'),
+      row1: pad16('PRESS TO START')
+    };
+  }
+
+  const lcd = getLcdLines();
 
   async function handleSimulateVote(slot) {
+    if (!isPoweredOn) return;
+
     if (isPublished) {
-      setFeedback(`🏆 Voting is closed! "${publishedElection.title}" is published (Winner: ${publishedElection.winner || 'Finalized'}). Push buttons are disabled.`);
+      setActiveLcdView(slot);
+      triggerHardwareAction('SHOW_CANDIDATE', null, slot).catch(console.error);
       return;
     }
 
     setLoadingSlot(slot);
-    setFeedback('');
+    setGreenBlink(true);
+    setTimeout(() => setGreenBlink(false), 120);
+    triggerTempMessage('Vote Recorded', `Candidate ${slot}`, 800);
+
+    // Auto-transition to voting if currently in standby
+    if (isStandby) {
+      setMachineMode('VOTING');
+    }
+
     try {
-      const res = await castVote(slot);
-      if (res.isPublished) {
-        setFeedback(`🏆 ${res.error || `Voting is closed. Winner: ${res.winner}`}`);
-      } else {
-        setFeedback(`Vote recorded for Candidate ${slot}! (${res.result?.candidate?.name}) • Arduino LCD display updated`);
-      }
+      await castVote(slot);
     } catch (err) {
-      setFeedback(`Error: ${err.message}`);
+      console.error('[VOTE ERR]', err);
     } finally {
       setLoadingSlot(null);
     }
   }
 
   async function handleTriggerAction(action) {
+    if (action === 'START') {
+      setMachineMode('VOTING');
+      setIsPoweredOn(true);
+      triggerTempMessage('VOTING STARTED', 'Cast your vote!', 1200);
+    } else if (action === 'PUBLISH') {
+      if (isPublished) {
+        setActiveLcdView('WINNER');
+        await triggerHardwareAction('SHOW_WINNER');
+        return;
+      }
+      setMachineMode('PUBLISHED');
+      setActiveLcdView('WINNER');
+      triggerTempMessage('RESULT PUBLISHED', 'Voting is closed', 1200);
+    } else if (action === 'RESET') {
+      setMachineMode('STANDBY');
+      setIsPoweredOn(true);
+      triggerTempMessage('VOTES RESET', 'Press to Start', 1500);
+    } else if (action === 'POWER_OFF') {
+      triggerTempMessage(' POWERING OFF...', '', 800);
+      setTimeout(() => {
+        setIsPoweredOn(false);
+      }, 800);
+    } else if (action === 'POWER_ON') {
+      setIsPoweredOn(true);
+      triggerTempMessage(' POWERING ON... ', '', 1000);
+    } else if (action === 'CYCLE_STATS') {
+      const order = ['WINNER', 'TOTAL', 'A', 'B', 'C', 'D'];
+      const nextIdx = (order.indexOf(activeLcdView) + 1) % order.length;
+      const nextSlot = order[nextIdx];
+      setActiveLcdView(nextSlot);
+      await triggerHardwareAction('CYCLE_STATS');
+      return;
+    } else if (action === 'SHOW_TOTAL') {
+      setActiveLcdView('TOTAL');
+      await triggerHardwareAction('SHOW_TOTAL');
+      return;
+    }
+
     try {
       await triggerHardwareAction(action);
-      setFeedback(`Action triggered: ${action}`);
     } catch (err) {
-      setFeedback(`Action error: ${err.message}`);
+      console.error('[ACTION ERR]', err);
     }
   }
 
   async function handleSyncLiveVotes() {
     setIsSyncing(true);
-    setFeedback('Loading existing election votes from database to Arduino...');
     try {
-      const res = await syncLiveElectionToHardware();
-      const t = res.tallies;
-      setFeedback(`✅ Loaded into Arduino LCD: A:${t.A} B:${t.B} C:${t.C} D:${t.D} ("${res.election}")`);
+      await syncLiveElectionToHardware();
     } catch (err) {
-      setFeedback(`Sync error: ${err.message}`);
+      console.error('[SYNC ERR]', err);
     } finally {
       setIsSyncing(false);
     }
   }
 
-  async function handleFlashFirmware() {
-    setIsFlashing(true);
-    setFeedback('Compiling & uploading firmware to Arduino Uno...');
-    try {
-      const res = await flashHardwareFirmware();
-      setFeedback(`Firmware successfully uploaded to Arduino Uno! (${res.message || 'Ready'})`);
-    } catch (err) {
-      setFeedback(`Upload failed: ${err.message}`);
-    } finally {
-      setIsFlashing(false);
-    }
-  }
-
   return (
     <div className="modal-overlay">
-      <div className="modal-container" style={{ maxWidth: '580px' }}>
+      <div className="modal-container" style={{ maxWidth: '620px' }}>
         <button className="modal-close-btn" onClick={onClose}>&times;</button>
-        <h2 className="modal-title">Hardware Console & Bridge</h2>
+        <h2 className="modal-title" style={{ marginBottom: '14px' }}>Hardware Console & Bridge</h2>
 
-        {/* Status / Live Polling Banner */}
-        {isPublished ? (
-          <div style={{ marginBottom: '16px', padding: '14px 16px', borderRadius: 'var(--radius-sm)', background: '#FEF2F2', border: '1px solid #FECACA' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: 800, color: '#991B1B' }}>
-                <span>🏆 Election Published & Sealed</span>
-              </div>
-              <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '999px', background: '#FEE2E2', color: '#991B1B' }}>
-                Voting Closed
+        {/* CONNECTION & PHYSICAL LEDS IN-LINE STATUS */}
+        <div
+          style={{
+            marginBottom: '14px',
+            padding: '12px 14px',
+            borderRadius: 'var(--radius-sm)',
+            background: isHardwareConnected ? '#F0FDF4' : '#FFFBEB',
+            border: `1px solid ${isHardwareConnected ? '#BBF7D0' : '#FDE68A'}`,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '10px'
+          }}
+        >
+          {/* Bridge Status */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span className="pulse-dot" style={{ background: isHardwareConnected ? '#10B981' : '#F59E0B' }}></span>
+            <span style={{ fontSize: '12px', fontWeight: 700, color: isHardwareConnected ? '#065F46' : '#92400E' }}>
+              {isHardwareConnected ? 'Arduino Uno Connected (/dev/cu.usbmodem11201)' : 'Arduino Serial Bridge Listening'}
+            </span>
+          </div>
+
+          {/* PHYSICAL ARDUINO HARDWARE LEDS (PINS D8 & D9) */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+            {/* Green LED (Pin D8) */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span
+                style={{
+                  width: '12px',
+                  height: '12px',
+                  borderRadius: '50%',
+                  background: (isGreenLedLit || greenBlink) ? '#22C55E' : '#14532D',
+                  boxShadow: (isGreenLedLit || greenBlink)
+                    ? '0 0 10px #22C55E, inset 0 1px 2px rgba(255,255,255,0.7)'
+                    : 'inset 0 1px 2px rgba(0,0,0,0.6)',
+                  border: '1px solid #166534',
+                  transition: 'all 0.1s ease'
+                }}
+              ></span>
+              <span style={{ fontSize: '11px', fontWeight: 700, color: (isGreenLedLit || greenBlink) ? '#15803D' : '#64748B' }}>
+                Green LED (D8): {(isGreenLedLit || greenBlink) ? 'ON' : 'OFF'}
               </span>
             </div>
-            <p style={{ fontSize: '13px', color: '#B91C1C', marginTop: '6px', fontWeight: 700 }}>
-              "{publishedElection.title}" — Official Winner: <span style={{ textDecoration: 'underline' }}>{publishedElection.winner || 'Completed'}</span>
-            </p>
-            <p style={{ fontSize: '11px', color: '#7F1D1D', marginTop: '3px' }}>
-              Push buttons (Pins D3, D4, D5, D6) and Publish actions are disabled. Click "Start Live" below to start a new election.
-            </p>
-          </div>
-        ) : (
-          <div style={{ marginBottom: '16px', padding: '12px 16px', borderRadius: 'var(--radius-sm)', background: isHardwareConnected ? '#ECFDF5' : '#FFFBEB', border: `1px solid ${isHardwareConnected ? '#A7F3D0' : '#FDE68A'}` }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: 700, color: isHardwareConnected ? '#065F46' : '#92400E' }}>
-              <span className="pulse-dot" style={{ background: isHardwareConnected ? '#10B981' : '#F59E0B' }}></span>
-              <span>{isHardwareConnected ? 'Arduino Uno Connected via Express USB Bridge' : 'Arduino Serial Bridge Listening (/dev/cu.usbmodem11201)'}</span>
+
+            {/* Red LED (Pin D9) */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span
+                style={{
+                  width: '12px',
+                  height: '12px',
+                  borderRadius: '50%',
+                  background: isRedLedLit ? '#EF4444' : '#7F1D1D',
+                  boxShadow: isRedLedLit
+                    ? '0 0 10px #EF4444, inset 0 1px 2px rgba(255,255,255,0.7)'
+                    : 'inset 0 1px 2px rgba(0,0,0,0.6)',
+                  border: '1px solid #991B1B',
+                  transition: 'all 0.1s ease'
+                }}
+              ></span>
+              <span style={{ fontSize: '11px', fontWeight: 700, color: isRedLedLit ? '#B91C1C' : '#64748B' }}>
+                Red LED (D9): {isRedLedLit ? 'ON' : 'OFF'}
+              </span>
             </div>
-            <p style={{ fontSize: '12px', color: isHardwareConnected ? '#047857' : '#B45309', marginTop: '4px' }}>
-              {liveElection ? `Active Live Polling: "${liveElection.title}" (${liveElection.candidates?.length || 4} Candidates)` : 'No live election. Pressing Start Live will begin a new election session.'}
-            </p>
           </div>
-        )}
+        </div>
 
-        {feedback && (
-          <div style={{ padding: '8px 12px', background: '#F1F5F9', borderRadius: 'var(--radius-sm)', fontSize: '12px', marginBottom: '14px', fontWeight: 600 }}>
-            {feedback}
-          </div>
-        )}
-
-        {/* Simulate Voting (Slots A, B, C, D) */}
-        <div style={{ marginBottom: '20px' }}>
+        {/* REAL-TIME 1602 LCD SIMULATOR (I2C 0X27) */}
+        <div
+          style={{
+            marginBottom: '16px',
+            background: '#0F172A',
+            borderRadius: '12px',
+            padding: '12px 16px',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+            border: '2px solid #334155'
+          }}
+        >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-            <label className="form-label" style={{ marginBottom: 0 }}>Simulate Push Buttons (Pins D3, D4, D5, D6)</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span
+                style={{
+                  width: '8px',
+                  height: '8px',
+                  borderRadius: '50%',
+                  background: isPoweredOn ? '#38BDF8' : '#475569',
+                  boxShadow: isPoweredOn ? '0 0 6px #38BDF8' : 'none'
+                }}
+              ></span>
+              <span style={{ fontSize: '11px', fontWeight: 800, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Physical 1602 LCD Display (I2C 0x27)
+              </span>
+            </div>
+            <span style={{ fontSize: '11px', color: isPoweredOn ? '#38BDF8' : '#64748B', fontWeight: 700 }}>
+              {!isPoweredOn
+                ? 'Display Sleeping'
+                : isStandby
+                ? 'Standby Mode'
+                : isVoting
+                ? 'Active Polling'
+                : `Published (${activeLcdView})`}
+            </span>
+          </div>
+
+          {/* LCD Screen Bezel */}
+          <div
+            style={{
+              background: isPoweredOn ? '#0284C7' : '#0B1120',
+              border: `3px solid ${isPoweredOn ? '#0369A1' : '#1E293B'}`,
+              borderRadius: '6px',
+              padding: '10px 14px',
+              boxShadow: isPoweredOn ? 'inset 0 2px 8px rgba(0,0,0,0.4)' : 'inset 0 2px 4px rgba(0,0,0,0.8)',
+              color: isPoweredOn ? '#F0F9FF' : '#1E293B',
+              fontFamily: '"Courier New", Courier, monospace',
+              fontWeight: 900,
+              fontSize: '17px',
+              letterSpacing: '2px',
+              lineHeight: 1.4,
+              textShadow: isPoweredOn ? '0 0 4px rgba(255,255,255,0.7)' : 'none',
+              userSelect: 'none',
+              transition: 'all 0.2s ease'
+            }}
+          >
+            <div style={{ whiteSpace: 'pre' }}>{lcd.row0}</div>
+            <div style={{ whiteSpace: 'pre' }}>{lcd.row1}</div>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '6px', fontSize: '10px', color: '#64748B' }}>
+            <span>Row 0: 16 Chars</span>
+            <span>Point-to-Point Sync: Arduino • Database • Display</span>
+            <span>Row 1: 16 Chars</span>
+          </div>
+        </div>
+
+        {/* PUSH BUTTONS (PINS D3, D4, D5, D6) */}
+        <div style={{ marginBottom: '18px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <label className="form-label" style={{ marginBottom: 0 }}>
+              {isPublished
+                ? 'Candidate Buttons (Pins D3, D4, D5, D6) - Click to Inspect'
+                : isStandby
+                ? 'Push Buttons (Pins D3, D4, D5, D6) - Standby Mode'
+                : 'Push Buttons (Pins D3, D4, D5, D6)'}
+            </label>
             {isPublished && (
-              <span style={{ fontSize: '11px', color: '#DC2626', fontWeight: 700 }}>Buttons Disabled (Voting Closed)</span>
+              <span style={{ fontSize: '11px', color: '#2563EB', fontWeight: 700 }}>
+                Active on LCD: {activeLcdView}
+              </span>
             )}
           </div>
+
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
             {['A', 'B', 'C', 'D'].map((slot, idx) => {
-              const activeCount = liveElection?.candidates?.length || (isPublished ? (publishedElection?.candidates?.length || 4) : 4);
-              const isDisabled = isPublished || idx >= activeCount;
+              const activeSource = isVoting ? liveElection : (publishedElection || liveElection);
+              const cand = activeSource?.candidates?.find(
+                (c) => (c.slot || '').toUpperCase() === slot.toUpperCase()
+              );
+              const activeCount = isVoting
+                ? (liveElection?.candidates?.length || 4)
+                : isPublished
+                ? (publishedElection?.candidates?.length || 4)
+                : 4;
+              const isDisabled = !isPublished && !isStandby && idx >= activeCount;
+              const isCurrentLcdSlot = isPublished && activeLcdView === slot;
+
               return (
                 <button
                   key={slot}
@@ -131,17 +514,51 @@ export default function HardwareModal({ isOpen, onClose, isHardwareConnected, li
                     padding: '12px 8px',
                     fontWeight: 800,
                     fontSize: '14px',
+                    cursor: 'pointer',
+                    borderColor: isCurrentLcdSlot
+                      ? '#2563EB'
+                      : isPublished
+                      ? '#93C5FD'
+                      : isDisabled
+                      ? '#CBD5E1'
+                      : 'var(--primary)',
+                    background: isCurrentLcdSlot
+                      ? '#DBEAFE'
+                      : isPublished
+                      ? '#EFF6FF'
+                      : 'transparent',
+                    color: isCurrentLcdSlot ? '#1E3A8A' : isPublished ? '#1E40AF' : undefined,
+                    boxShadow: isCurrentLcdSlot ? '0 0 0 2px #3B82F6' : undefined,
                     opacity: isDisabled ? 0.35 : 1,
-                    cursor: isDisabled ? 'not-allowed' : 'pointer',
-                    borderColor: isDisabled ? '#CBD5E1' : 'var(--primary)',
-                    background: isPublished ? '#F8FAFC' : 'transparent'
+                    transition: 'all 0.1s ease'
                   }}
                   disabled={isDisabled || loadingSlot === slot}
                   onClick={() => handleSimulateVote(slot)}
                 >
-                  {loadingSlot === slot ? '...' : `Btn ${slot} (D${idx + 3})`}
-                  <span style={{ display: 'block', fontSize: '10px', color: 'var(--text-muted)', fontWeight: 500 }}>
-                    {isPublished ? 'Closed' : (idx >= activeCount ? 'Disabled' : `Slot ${slot}`)}
+                  {loadingSlot === slot
+                    ? '...'
+                    : isPublished
+                    ? `View ${slot}`
+                    : `Btn ${slot} (D${idx + 3})`}
+                  <span
+                    style={{
+                      display: 'block',
+                      fontSize: '10px',
+                      color: isPublished ? '#3B82F6' : 'var(--text-muted)',
+                      fontWeight: 600
+                    }}
+                  >
+                    {isStandby
+                      ? `Slot ${slot}`
+                      : isPublished
+                      ? cand
+                        ? `${cand.votes} votes`
+                        : '0 votes'
+                      : idx >= activeCount
+                      ? 'Disabled'
+                      : cand
+                      ? `${cand.votes} votes`
+                      : `Slot ${slot}`}
                   </span>
                 </button>
               );
@@ -149,58 +566,74 @@ export default function HardwareModal({ isOpen, onClose, isHardwareConnected, li
           </div>
         </div>
 
-        {/* Hardware Control Actions */}
-        <div style={{ marginBottom: '20px' }}>
+        {/* CONTROL PIN 7 HARDWARE ACTIONS */}
+        <div style={{ marginBottom: '18px' }}>
           <label className="form-label">Control Pin 7 Hardware Actions</label>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <button className="btn-outline" onClick={() => handleTriggerAction('START')}>
-              Start Live (1 Click)
+              {isStandby ? 'Start Voting (1 Click)' : isPublished ? 'Start New Live (1 Click)' : 'Restart Live (1 Click)'}
             </button>
+
             <button
               className="btn-outline"
-              disabled={isPublished}
               style={{
-                opacity: isPublished ? 0.4 : 1,
-                cursor: isPublished ? 'not-allowed' : 'pointer'
+                cursor: 'pointer',
+                borderColor: isPublished ? '#10B981' : undefined,
+                color: isPublished ? '#065F46' : undefined,
+                background: isPublished && activeLcdView === 'WINNER' ? '#A7F3D0' : isPublished ? '#ECFDF5' : undefined,
+                fontWeight: isPublished ? 800 : 500,
+                boxShadow: isPublished && activeLcdView === 'WINNER' ? '0 0 0 2px #10B981' : undefined
               }}
               onClick={() => handleTriggerAction('PUBLISH')}
             >
-              {isPublished ? 'Published (Completed)' : 'Publish Results (1 Click)'}
+              {isPublished ? '🏆 Show Winner (LCD)' : 'Publish Results (1 Click)'}
             </button>
+
+            {isPublished && (
+              <>
+                <button
+                  className="btn-outline"
+                  style={{
+                    background: activeLcdView === 'TOTAL' ? '#E2E8F0' : '#F8FAFC',
+                    borderColor: '#94A3B8',
+                    color: '#334155',
+                    fontWeight: 700
+                  }}
+                  onClick={() => handleTriggerAction('SHOW_TOTAL')}
+                >
+                  👥 Total Votes (LCD)
+                </button>
+                <button
+                  className="btn-outline"
+                  style={{ background: '#F8FAFC', borderColor: '#94A3B8', color: '#334155', fontWeight: 700 }}
+                  onClick={() => handleTriggerAction('CYCLE_STATS')}
+                >
+                  📊 Cycle LCD Screens
+                </button>
+              </>
+            )}
+
             <button className="btn-outline" onClick={() => handleTriggerAction('RESET')}>
-              Reset Counts (3s)
+              {isStandby ? 'Clear Counts (3s)' : 'Reset to Standby (3s)'}
             </button>
+
             <button className="btn-outline" onClick={() => handleTriggerAction('POWER_OFF')}>
               Display Sleep (5s)
             </button>
+
             <button className="btn-outline" onClick={() => handleTriggerAction('POWER_ON')}>
               Display Wake (5s)
             </button>
+
             <button
               className="btn-outline"
               style={{ background: '#F0FDF4', borderColor: '#86EFAC', color: '#166534', fontWeight: 700 }}
               disabled={isSyncing}
               onClick={handleSyncLiveVotes}
             >
-              {isSyncing ? '🔄 Loading...' : '🔄 Load Live Votes to LCD'}
+              {isSyncing ? '🔄 Loading...' : isPublished ? '🔄 Load Final Results to LCD' : '🔄 Load Live Votes to LCD'}
             </button>
           </div>
-        </div>
-
-        {/* Upload Firmware Action */}
-        <div style={{ marginBottom: '24px', paddingTop: '14px', borderTop: '1px solid #E2E8F0' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-            <label className="form-label" style={{ marginBottom: 0 }}>Arduino Sketch Firmware</label>
-            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Terminal: <code>npm run upload</code></span>
-          </div>
-          <button
-            className="btn-outline"
-            style={{ width: '100%', borderColor: '#3B82F6', color: '#1D4ED8', fontWeight: 700, padding: '10px' }}
-            disabled={isFlashing}
-            onClick={handleFlashFirmware}
-          >
-            {isFlashing ? '⏳ Compiling & Uploading to Arduino Uno...' : '⚡ Upload Code to Arduino Uno'}
-          </button>
         </div>
 
         <div style={{ textAlign: 'right' }}>

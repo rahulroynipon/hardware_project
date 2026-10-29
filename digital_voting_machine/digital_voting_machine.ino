@@ -181,24 +181,9 @@ void showWelcome() {
   lcd.clear();
   lcd.setCursor(1, 0);
   lcd.print("DIGITAL VOTING");
-
-  const char message[] = "WELCOME TO CITY UNIVERSITY";
-  int length = sizeof(message) - 1;
-
-  // Slower, smooth and comfortably readable scrolling (380ms delay per step)
-  for (int position = 16; position >= -length; position--) {
-    lcd.setCursor(0, 1);
-    lcd.print("                ");
-
-    for (int i = 0; i < length; i++) {
-      int x = position + i;
-      if (x >= 0 && x < 16) {
-        lcd.setCursor(x, 1);
-        lcd.print(message[i]);
-      }
-    }
-    delay(380);
-  }
+  lcd.setCursor(0, 1);
+  lcd.print("CITY UNIVERSITY ");
+  delay(1200);
   lcd.clear();
 }
 

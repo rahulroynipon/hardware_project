@@ -73,11 +73,11 @@ export async function fetchHardwareStatus() {
   return res.json();
 }
 
-export async function triggerHardwareAction(action, count) {
+export async function triggerHardwareAction(action, count, slot) {
   const res = await fetch(`${API_BASE}/hardware/action`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action, count })
+    body: JSON.stringify({ action, count, slot })
   });
   return res.json();
 }

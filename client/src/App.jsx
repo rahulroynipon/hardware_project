@@ -24,6 +24,7 @@ export default function App() {
   const [isHardwareConnected, setIsHardwareConnected] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isHardwareModalOpen, setIsHardwareModalOpen] = useState(false);
+  const [lastHardwareEvent, setLastHardwareEvent] = useState(null);
 
   // Load elections from Express & PostgreSQL
   const loadElections = useCallback(async () => {
@@ -60,7 +61,8 @@ export default function App() {
         console.log('[WS INCOMING]', msg);
         if (msg.type === 'VOTE_CAST') {
           // Live vote update: increment candidate votes in state
-          const { electionId, candidateId, candidateVotes } = msg.payload;
+          const { electionId, candidateId, candidateVotes, slot } = msg.payload;
+          setLastHardwareEvent({ action: 'VOTE_CAST', slot, _t: Date.now() });
           setElections((prev) =>
             prev.map((el) => {
               if (el.id === electionId) {
@@ -72,7 +74,10 @@ export default function App() {
               return el;
             })
           );
-        } else if (msg.type === 'ELECTION_UPDATED' || msg.type === 'ELECTION_CREATED' || msg.type === 'HARDWARE_EVENT') {
+        } else if (msg.type === 'HARDWARE_EVENT') {
+          setLastHardwareEvent({ ...msg.payload, _t: Date.now() });
+          loadElections();
+        } else if (msg.type === 'ELECTION_UPDATED' || msg.type === 'ELECTION_CREATED') {
           // Full sync on status transitions
           loadElections();
         }
@@ -190,6 +195,7 @@ export default function App() {
         isHardwareConnected={isHardwareConnected}
         liveElection={liveElection}
         publishedElection={selectedElection?.status === 'published' ? selectedElection : elections.find((e) => e.status === 'published')}
+        lastHardwareEvent={lastHardwareEvent}
       />
     </div>
   );
