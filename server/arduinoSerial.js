@@ -16,9 +16,10 @@ class ArduinoSerialBridge {
     this.onStatusCallback = null;
     this.onConnectCallback = null;
     this.onInspectCallback = null;
+    this.onVoteBlockedCallback = null;
   }
 
-  setCallbacks({ onVote, onStart, onPublish, onReset, onStatus, onConnect, onInspect }) {
+  setCallbacks({ onVote, onStart, onPublish, onReset, onStatus, onConnect, onInspect, onVoteBlocked }) {
     this.onVoteCallback = onVote;
     this.onStartCallback = onStart;
     this.onPublishCallback = onPublish;
@@ -26,6 +27,7 @@ class ArduinoSerialBridge {
     this.onStatusCallback = onStatus;
     this.onConnectCallback = onConnect;
     this.onInspectCallback = onInspect;
+    this.onVoteBlockedCallback = onVoteBlocked;
   }
 
   async connect() {
@@ -143,6 +145,8 @@ class ArduinoSerialBridge {
         console.log(`[ARDUINO ACK] Simulated vote recorded on Arduino LCD for Candidate ${cand}`);
       } else if (event === 'INSPECT' || event === 'PAGE') {
         if (this.onInspectCallback) this.onInspectCallback(cand);
+      } else if (event === 'VOTE_BLOCKED') {
+        if (this.onVoteBlockedCallback) this.onVoteBlockedCallback(cand, parts[parts.length - 1]);
       } else if (event === 'START') {
         if (parts[parts.length - 1] === 'MachineReady') {
           console.log('[ARDUINO] Arduino boot completed. Synchronizing state...');
@@ -173,6 +177,13 @@ class ArduinoSerialBridge {
 
   simulateVote(slot) {
     this.send(`VOTE:${slot.toUpperCase()}`);
+  }
+
+  syncState(state, tallies = [0, 0, 0, 0]) {
+    const s = String(state || 'VOTING').toUpperCase();
+    const t = Array.isArray(tallies) ? tallies : [tallies?.A || 0, tallies?.B || 0, tallies?.C || 0, tallies?.D || 0];
+    const cleanTallies = [t[0] || 0, t[1] || 0, t[2] || 0, t[3] || 0];
+    this.send(`SYNC:${s}:${cleanTallies.join(',')}`);
   }
 
   syncTallies(tallies) {

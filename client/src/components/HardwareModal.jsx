@@ -76,6 +76,13 @@ export default function HardwareModal({
       setGreenBlink(true);
       setTimeout(() => setGreenBlink(false), 120);
       triggerTempMessage('Vote Recorded', `Candidate ${slot}`, 800);
+    } else if (action === 'VOTE_BLOCKED') {
+      const isNotStarted = (lastHardwareEvent.reason === 'VotingNotStarted') || (machineMode === 'STANDBY');
+      const row0 = isNotStarted ? 'NOT STARTED' : 'RESULT PUBLISHED';
+      const row1 = isNotStarted ? 'Press to Start' : 'Voting is closed';
+      if (!tempMessage || tempMessage.row0 !== row0) {
+        triggerTempMessage(row0, row1, 1500);
+      }
     } else if (action === 'RESET') {
       setMachineMode('STANDBY');
       setIsPoweredOn(true);
@@ -225,12 +232,12 @@ export default function HardwareModal({
 
       if (total === 0) {
         return {
-          row0: pad16('WINNER: NONE'),
-          row1: pad16('No Votes Cast')
+          row0: pad16('NO VOTES CAST'),
+          row1: pad16('Total: 0')
         };
       } else if (winnerCount > 1) {
         return {
-          row0: pad16('WINNER: TIE'),
+          row0: pad16('TIE - WINNER'),
           row1: pad16(`Top votes: ${highest}`)
         };
       } else {
@@ -254,8 +261,14 @@ export default function HardwareModal({
     if (!isPoweredOn) return;
 
     if (isPublished) {
-      setActiveLcdView(slot);
-      triggerHardwareAction('SHOW_CANDIDATE', null, slot).catch(console.error);
+      triggerTempMessage('RESULT PUBLISHED', 'Voting is closed', 1500);
+      castVote(slot).catch(() => {});
+      return;
+    }
+
+    if (isStandby) {
+      triggerTempMessage('NOT STARTED', 'Press to Start', 1500);
+      castVote(slot).catch(() => {});
       return;
     }
 
@@ -263,11 +276,6 @@ export default function HardwareModal({
     setGreenBlink(true);
     setTimeout(() => setGreenBlink(false), 120);
     triggerTempMessage('Vote Recorded', `Candidate ${slot}`, 800);
-
-    // Auto-transition to voting if currently in standby
-    if (isStandby) {
-      setMachineMode('VOTING');
-    }
 
     try {
       await castVote(slot);
@@ -324,7 +332,7 @@ export default function HardwareModal({
     }
   }
 
-  async function handleSyncLiveVotes() {
+  async function handleSync() {
     setIsSyncing(true);
     try {
       await syncLiveElectionToHardware();
@@ -480,14 +488,14 @@ export default function HardwareModal({
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
             <label className="form-label" style={{ marginBottom: 0 }}>
               {isPublished
-                ? 'Candidate Buttons (Pins D3, D4, D5, D6) - Click to Inspect'
+                ? 'Push Buttons (Pins D3, D4, D5, D6) - Voting Closed'
                 : isStandby
                 ? 'Push Buttons (Pins D3, D4, D5, D6) - Standby Mode'
                 : 'Push Buttons (Pins D3, D4, D5, D6)'}
             </label>
             {isPublished && (
               <span style={{ fontSize: '11px', color: '#2563EB', fontWeight: 700 }}>
-                Active on LCD: {activeLcdView}
+                Displaying on LCD: {activeLcdView}
               </span>
             )}
           </div>
@@ -504,7 +512,6 @@ export default function HardwareModal({
                 ? (publishedElection?.candidates?.length || 4)
                 : 4;
               const isDisabled = !isPublished && !isStandby && idx >= activeCount;
-              const isCurrentLcdSlot = isPublished && activeLcdView === slot;
 
               return (
                 <button
@@ -515,20 +522,8 @@ export default function HardwareModal({
                     fontWeight: 800,
                     fontSize: '14px',
                     cursor: 'pointer',
-                    borderColor: isCurrentLcdSlot
-                      ? '#2563EB'
-                      : isPublished
-                      ? '#93C5FD'
-                      : isDisabled
-                      ? '#CBD5E1'
-                      : 'var(--primary)',
-                    background: isCurrentLcdSlot
-                      ? '#DBEAFE'
-                      : isPublished
-                      ? '#EFF6FF'
-                      : 'transparent',
-                    color: isCurrentLcdSlot ? '#1E3A8A' : isPublished ? '#1E40AF' : undefined,
-                    boxShadow: isCurrentLcdSlot ? '0 0 0 2px #3B82F6' : undefined,
+                    borderColor: isDisabled ? '#CBD5E1' : isPublished ? '#FCA5A5' : 'var(--primary)',
+                    background: isPublished ? '#FEF2F2' : 'transparent',
                     opacity: isDisabled ? 0.35 : 1,
                     transition: 'all 0.1s ease'
                   }}
@@ -537,23 +532,19 @@ export default function HardwareModal({
                 >
                   {loadingSlot === slot
                     ? '...'
-                    : isPublished
-                    ? `View ${slot}`
                     : `Btn ${slot} (D${idx + 3})`}
                   <span
                     style={{
                       display: 'block',
                       fontSize: '10px',
-                      color: isPublished ? '#3B82F6' : 'var(--text-muted)',
+                      color: isPublished ? '#DC2626' : 'var(--text-muted)',
                       fontWeight: 600
                     }}
                   >
                     {isStandby
                       ? `Slot ${slot}`
                       : isPublished
-                      ? cand
-                        ? `${cand.votes} votes`
-                        : '0 votes'
+                      ? 'Voting Closed'
                       : idx >= activeCount
                       ? 'Disabled'
                       : cand
@@ -617,21 +608,28 @@ export default function HardwareModal({
               {isStandby ? 'Clear Counts (3s)' : 'Reset to Standby (3s)'}
             </button>
 
-            <button className="btn-outline" onClick={() => handleTriggerAction('POWER_OFF')}>
-              Display Sleep (5s)
-            </button>
-
-            <button className="btn-outline" onClick={() => handleTriggerAction('POWER_ON')}>
-              Display Wake (5s)
-            </button>
+            {isPoweredOn ? (
+              <button className="btn-outline" onClick={() => handleTriggerAction('POWER_OFF')}>
+                Display Sleep (5s)
+              </button>
+            ) : (
+              <button className="btn-outline" onClick={() => handleTriggerAction('POWER_ON')}>
+                Display Wake (5s)
+              </button>
+            )}
 
             <button
               className="btn-outline"
-              style={{ background: '#F0FDF4', borderColor: '#86EFAC', color: '#166534', fontWeight: 700 }}
+              style={{
+                background: '#F0FDF4',
+                borderColor: '#86EFAC',
+                color: '#166534',
+                fontWeight: 700
+              }}
               disabled={isSyncing}
-              onClick={handleSyncLiveVotes}
+              onClick={handleSync}
             >
-              {isSyncing ? '🔄 Loading...' : isPublished ? '🔄 Load Final Results to LCD' : '🔄 Load Live Votes to LCD'}
+              {isSyncing ? '🔄 Syncing...' : '🔄 Sync with Hardware'}
             </button>
           </div>
         </div>

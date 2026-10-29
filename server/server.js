@@ -115,6 +115,9 @@ async function castVoteBySlot(slot, { fromHardware = false } = {}) {
     const { rows } = await pool.query("SELECT * FROM elections ORDER BY updated_at DESC, created_at DESC LIMIT 1;");
     if (rows.length > 0 && rows[0].status === 'published') {
       const pub = rows[0];
+      if (!fromHardware) {
+        arduinoBridge.simulateVote(slot.toUpperCase());
+      }
       console.log(`[VOTE BLOCKED] Voting is closed. "${pub.title}" is already published (Winner: ${pub.winner}).`);
       return {
         isPublished: true,
@@ -276,6 +279,16 @@ arduinoBridge.setCallbacks({
       slot,
       rawSlot: cand,
       message: `${slot === 'WINNER' ? 'Winner' : slot === 'TOTAL' ? 'Total votes' : `Candidate ${slot}`} displayed on Arduino LCD`
+    });
+  },
+  onVoteBlocked: (cand, reason) => {
+    console.log(`[HARDWARE EVENT] Vote blocked on Arduino for Candidate ${cand} (reason: ${reason})`);
+    const isNotStarted = (reason === 'VotingNotStarted');
+    broadcast('HARDWARE_EVENT', {
+      action: 'VOTE_BLOCKED',
+      slot: cand,
+      reason,
+      message: isNotStarted ? 'NOT STARTED - Press to Start' : 'RESULT PUBLISHED - Voting is closed'
     });
   },
   onConnect: async () => {
@@ -665,6 +678,7 @@ app.post('/api/hardware/action', (req, res) => {
       arduinoBridge.startVoting();
       break;
     case 'PUBLISH':
+      arduinoBridge.publishResults();
       closeAndPublishLiveElection().catch(console.error);
       break;
     case 'RESET':
@@ -757,7 +771,9 @@ app.post('/api/hardware/sync', async (req, res) => {
     }
 
     if (!election || !election.candidates || election.candidates.length === 0) {
-      return res.status(400).json({ success: false, error: 'No live or published election found to sync.' });
+      arduinoBridge.syncState('STANDBY', [0, 0, 0, 0]);
+      broadcast('HARDWARE_EVENT', { action: 'RESET', message: 'Machine synced to Standby mode' });
+      return res.json({ success: true, message: 'Synchronized Arduino to Standby mode', state: 'STANDBY' });
     }
 
     const tallies = [0, 0, 0, 0];
@@ -769,17 +785,13 @@ app.post('/api/hardware/sync', async (req, res) => {
     });
 
     arduinoBridge.setCandidateCount(election.candidates.length);
-    if (isPublishedSync) {
-      arduinoBridge.syncTallies(tallies);
-      setTimeout(() => {
-        arduinoBridge.publishResults();
-      }, 250);
-    } else {
-      arduinoBridge.startVoting();
-      setTimeout(() => {
-        arduinoBridge.syncTallies(tallies);
-      }, 250);
-    }
+    const targetState = isPublishedSync ? 'PUBLISHED' : 'VOTING';
+    arduinoBridge.syncState(targetState, tallies);
+    broadcast('HARDWARE_EVENT', {
+      action: isPublishedSync ? 'PUBLISH' : 'START',
+      election,
+      message: `Synchronized ${targetState} mode with Arduino`
+    });
 
     console.log(`[HARDWARE SYNC] Synced (${isPublishedSync ? 'PUBLISHED' : 'LIVE'}) "${election.title}" (${election.candidates.length} candidates, tallies: ${tallies.join(',')}) to Arduino.`);
     res.json({
