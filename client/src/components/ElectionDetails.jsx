@@ -409,7 +409,7 @@ export default function ElectionDetails({
                 <h3>Vote Progression Trend</h3>
                 <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Real-time</span>
               </div>
-              <div style={{ height: '240px' }}>
+              <div style={{ height: '240px', position: 'relative', width: '100%', minWidth: 0, overflow: 'hidden' }}>
                 <Line data={lineData} options={lineOptions} />
               </div>
             </div>
@@ -505,7 +505,7 @@ export default function ElectionDetails({
       {activeSubTab === 'Live Results' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
           {/* Top 4 KPI Analytics Cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
+          <div className="analytics-kpi-grid">
             {/* Total Ballots */}
             <div style={{ background: '#FFFFFF', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '18px', boxShadow: 'var(--shadow-sm)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -560,9 +560,9 @@ export default function ElectionDetails({
           </div>
 
           {/* Row 2: Head-to-Head Comparative Bar Chart + Live Donut */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '20px' }}>
+          <div className="analytics-2col-grid">
             {/* Horizontal Bar Chart */}
-            <div style={{ background: '#FFFFFF', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '22px', boxShadow: 'var(--shadow-sm)' }}>
+            <div style={{ background: '#FFFFFF', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '22px', boxShadow: 'var(--shadow-sm)', minWidth: 0, maxWidth: '100%', overflow: 'hidden' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <div>
                   <h3 style={{ fontSize: '16px', fontWeight: 800 }}>Candidate Comparison (Head-to-Head)</h3>
@@ -572,18 +572,18 @@ export default function ElectionDetails({
                   Live Bar Chart
                 </span>
               </div>
-              <div style={{ height: '240px' }}>
+              <div style={{ height: '240px', position: 'relative', width: '100%', minWidth: 0, overflow: 'hidden' }}>
                 <Bar data={barData} options={barOptions} />
               </div>
             </div>
 
             {/* Donut Chart */}
-            <div style={{ background: '#FFFFFF', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '22px', boxShadow: 'var(--shadow-sm)' }}>
+            <div style={{ background: '#FFFFFF', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '22px', boxShadow: 'var(--shadow-sm)', minWidth: 0, maxWidth: '100%', overflow: 'hidden' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
                 <h3 style={{ fontSize: '16px', fontWeight: 800 }}>Vote Share Distribution</h3>
                 <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>100% Total</span>
               </div>
-              <div style={{ height: '220px', position: 'relative' }}>
+              <div style={{ height: '220px', position: 'relative', width: '100%', minWidth: 0, overflow: 'hidden' }}>
                 <Doughnut data={donutData} options={donutOptions} />
                 <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', textAlign: 'center', pointerEvents: 'none' }}>
                   <strong style={{ fontSize: '22px', fontWeight: 800, display: 'block', color: 'var(--text-main)' }}>
@@ -598,9 +598,9 @@ export default function ElectionDetails({
           </div>
 
           {/* Row 3: Cumulative Time Series Trend + Hourly Activity Velocity */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '20px' }}>
+          <div className="analytics-2col-grid">
             {/* Cumulative Line Trend */}
-            <div style={{ background: '#FFFFFF', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '22px', boxShadow: 'var(--shadow-sm)' }}>
+            <div style={{ background: '#FFFFFF', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '22px', boxShadow: 'var(--shadow-sm)', minWidth: 0, maxWidth: '100%', overflow: 'hidden' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <div>
                   <h3 style={{ fontSize: '16px', fontWeight: 800 }}>Cumulative Vote Accumulation</h3>
@@ -610,13 +610,13 @@ export default function ElectionDetails({
                   Time Series
                 </span>
               </div>
-              <div style={{ height: '230px' }}>
+              <div style={{ height: '230px', position: 'relative', width: '100%', minWidth: 0, overflow: 'hidden' }}>
                 <Line data={lineData} options={lineOptions} />
               </div>
             </div>
 
             {/* Hourly Activity Bar Chart */}
-            <div style={{ background: '#FFFFFF', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '22px', boxShadow: 'var(--shadow-sm)' }}>
+            <div style={{ background: '#FFFFFF', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '22px', boxShadow: 'var(--shadow-sm)', minWidth: 0, maxWidth: '100%', overflow: 'hidden' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <div>
                   <h3 style={{ fontSize: '16px', fontWeight: 800 }}>Voting Activity Velocity</h3>
@@ -626,76 +626,78 @@ export default function ElectionDetails({
                   Hourly
                 </span>
               </div>
-              <div style={{ height: '230px' }}>
+              <div style={{ height: '230px', position: 'relative', width: '100%', minWidth: 0, overflow: 'hidden' }}>
                 <Bar data={hourlyData} options={hourlyOptions} />
               </div>
             </div>
           </div>
 
           {/* Row 4: Detailed Audit Leaderboard + Live Hardware Ballot Feed */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '20px' }}>
+          <div className="analytics-2col-grid">
             {/* Full Ranked Leaderboard */}
-            <div style={{ background: '#FFFFFF', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '22px', boxShadow: 'var(--shadow-sm)' }}>
+            <div style={{ background: '#FFFFFF', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '22px', boxShadow: 'var(--shadow-sm)', minWidth: 0, maxWidth: '100%', overflow: 'hidden' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <h3 style={{ fontSize: '16px', fontWeight: 800 }}>Ranked Leaderboard</h3>
                 <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Sorted by vote tally</span>
               </div>
 
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                <thead>
-                  <tr style={{ borderBottom: '1.5px solid #E2E8F0', textAlign: 'left', color: 'var(--text-muted)', fontSize: '12px' }}>
-                    <th style={{ padding: '8px 10px' }}>Rank</th>
-                    <th style={{ padding: '8px 10px' }}>Slot</th>
-                    <th style={{ padding: '8px 10px' }}>Candidate</th>
-                    <th style={{ padding: '8px 10px', textAlign: 'right' }}>Votes</th>
-                    <th style={{ padding: '8px 10px', textAlign: 'right' }}>Share</th>
-                    <th style={{ padding: '8px 10px', textAlign: 'center' }}>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sortedCandidates.map((cand, idx) => {
-                    const pct = totalVotes > 0 ? ((cand.votes / totalVotes) * 100).toFixed(1) : '0.0';
-                    const isWinning = idx === 0 && totalVotes > 0;
-                    return (
-                      <tr key={cand.id || idx} style={{ borderBottom: '1px solid #F1F5F9', background: isWinning ? '#F0FDF4' : 'transparent' }}>
-                        <td style={{ padding: '12px 10px', fontWeight: 700, color: isWinning ? '#16A34A' : 'var(--text-muted)' }}>
-                          #{idx + 1}
-                        </td>
-                        <td style={{ padding: '12px 10px' }}>
-                          <span style={{ width: '24px', height: '24px', borderRadius: '50%', background: chartColors[cand.order ? cand.order - 1 : idx], color: '#FFFFFF', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 800 }}>
-                            {cand.slot}
-                          </span>
-                        </td>
-                        <td style={{ padding: '12px 10px' }}>
-                          <strong style={{ fontSize: '14px', color: 'var(--text-main)' }}>{cand.name}</strong>
-                          <span style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)' }}>Arduino Pin {3 + idx}</span>
-                        </td>
-                        <td style={{ padding: '12px 10px', textAlign: 'right', fontWeight: 800, fontSize: '14px' }}>
-                          {cand.votes || 0}
-                        </td>
-                        <td style={{ padding: '12px 10px', textAlign: 'right', fontWeight: 700, color: 'var(--primary)' }}>
-                          {pct}%
-                        </td>
-                        <td style={{ padding: '12px 10px', textAlign: 'center' }}>
-                          {isWinning ? (
-                            <span style={{ fontSize: '11px', fontWeight: 700, background: '#DCFCE7', color: '#16A34A', padding: '3px 8px', borderRadius: '4px' }}>
-                              🏆 Leading
+              <div style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+                <table style={{ width: '100%', minWidth: '420px', borderCollapse: 'collapse', fontSize: '13px' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1.5px solid #E2E8F0', textAlign: 'left', color: 'var(--text-muted)', fontSize: '12px' }}>
+                      <th style={{ padding: '8px 10px' }}>Rank</th>
+                      <th style={{ padding: '8px 10px' }}>Slot</th>
+                      <th style={{ padding: '8px 10px' }}>Candidate</th>
+                      <th style={{ padding: '8px 10px', textAlign: 'right' }}>Votes</th>
+                      <th style={{ padding: '8px 10px', textAlign: 'right' }}>Share</th>
+                      <th style={{ padding: '8px 10px', textAlign: 'center' }}>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedCandidates.map((cand, idx) => {
+                      const pct = totalVotes > 0 ? ((cand.votes / totalVotes) * 100).toFixed(1) : '0.0';
+                      const isWinning = idx === 0 && totalVotes > 0;
+                      return (
+                        <tr key={cand.id || idx} style={{ borderBottom: '1px solid #F1F5F9', background: isWinning ? '#F0FDF4' : 'transparent' }}>
+                          <td style={{ padding: '12px 10px', fontWeight: 700, color: isWinning ? '#16A34A' : 'var(--text-muted)' }}>
+                            #{idx + 1}
+                          </td>
+                          <td style={{ padding: '12px 10px' }}>
+                            <span style={{ width: '24px', height: '24px', borderRadius: '50%', background: chartColors[cand.order ? cand.order - 1 : idx], color: '#FFFFFF', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 800 }}>
+                              {cand.slot}
                             </span>
-                          ) : (
-                            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                              Runner-up
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                          </td>
+                          <td style={{ padding: '12px 10px' }}>
+                            <strong style={{ fontSize: '14px', color: 'var(--text-main)' }}>{cand.name}</strong>
+                            <span style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)' }}>Arduino Pin {3 + idx}</span>
+                          </td>
+                          <td style={{ padding: '12px 10px', textAlign: 'right', fontWeight: 800, fontSize: '14px' }}>
+                            {cand.votes || 0}
+                          </td>
+                          <td style={{ padding: '12px 10px', textAlign: 'right', fontWeight: 700, color: 'var(--primary)' }}>
+                            {pct}%
+                          </td>
+                          <td style={{ padding: '12px 10px', textAlign: 'center' }}>
+                            {isWinning ? (
+                              <span style={{ fontSize: '11px', fontWeight: 700, background: '#DCFCE7', color: '#16A34A', padding: '3px 8px', borderRadius: '4px' }}>
+                                🏆 Leading
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                                Runner-up
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             {/* Hardware Telemetry Feed */}
-            <div style={{ background: '#FFFFFF', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '22px', boxShadow: 'var(--shadow-sm)' }}>
+            <div style={{ background: '#FFFFFF', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '22px', boxShadow: 'var(--shadow-sm)', minWidth: 0, maxWidth: '100%', overflow: 'hidden' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
                 <h3 style={{ fontSize: '16px', fontWeight: 800 }}>Hardware Telemetry Feed</h3>
                 <span style={{ fontSize: '11px', color: '#16A34A', fontWeight: 700 }}>● Live 9600 Baud</span>
@@ -773,7 +775,7 @@ export default function ElectionDetails({
 
       {/* -------------------- TAB 4: SETTINGS -------------------- */}
       {activeSubTab === 'Settings' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '24px' }}>
+        <div className="analytics-2col-grid">
           {/* Election Controls & Info */}
           <div>
             <div style={{ background: '#FFFFFF', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '24px', marginBottom: '20px' }}>

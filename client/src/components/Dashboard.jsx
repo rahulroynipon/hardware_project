@@ -325,7 +325,7 @@ export default function Dashboard({
             <h3>Vote Trend (Live)</h3>
             <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Last 2 Hours</span>
           </div>
-          <div style={{ height: '220px' }}>
+          <div style={{ height: '220px', position: 'relative', width: '100%', minWidth: 0, overflow: 'hidden' }}>
             <Line data={lineData} options={lineOptions} />
           </div>
         </div>

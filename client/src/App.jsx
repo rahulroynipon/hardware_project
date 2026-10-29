@@ -123,7 +123,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
+    <div className="min-h-screen bg-slate-50 flex flex-col w-full max-w-full overflow-x-hidden">
       {/* Top Navigation Header */}
       <Header
         currentView={currentView}
@@ -136,7 +136,7 @@ export default function App() {
       />
 
       {/* Main View Router */}
-      <main className="flex-1">
+      <main className="flex-1 w-full max-w-full min-w-0 overflow-x-hidden">
         {currentView === 'dashboard' && (
           <Dashboard
             elections={elections}

@@ -215,7 +215,7 @@ export default function CreateElectionModal({ isOpen, onClose, onSubmit }) {
         {/* Step 1: Details, Banner & Date Fields */}
         {step === 1 && (
           <div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr', gap: '24px' }}>
+            <div className="modal-form-grid">
               <div>
                 {/* Title */}
                 <div className="form-group">
@@ -303,7 +303,7 @@ export default function CreateElectionModal({ isOpen, onClose, onSubmit }) {
                 </div>
 
                 {/* Simple Start Date & End Date Fields */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginTop: '16px' }}>
+                <div className="modal-dates-grid">
                   <div className="form-group" style={{ marginBottom: 0 }}>
                     <label className="form-label">📅 Start Date & Time *</label>
                     <input
@@ -507,7 +507,7 @@ export default function CreateElectionModal({ isOpen, onClose, onSubmit }) {
         {/* Step 3: Review */}
         {step === 3 && (
           <div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '24px', marginBottom: '24px' }}>
+            <div className="modal-review-grid">
               {/* Election Details Review */}
               <div style={{ border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '20px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
