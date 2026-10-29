@@ -14,14 +14,16 @@ class ArduinoSerialBridge {
     this.onPublishCallback = null;
     this.onResetCallback = null;
     this.onStatusCallback = null;
+    this.onConnectCallback = null;
   }
 
-  setCallbacks({ onVote, onStart, onPublish, onReset, onStatus }) {
+  setCallbacks({ onVote, onStart, onPublish, onReset, onStatus, onConnect }) {
     this.onVoteCallback = onVote;
     this.onStartCallback = onStart;
     this.onPublishCallback = onPublish;
     this.onResetCallback = onReset;
     this.onStatusCallback = onStatus;
+    this.onConnectCallback = onConnect;
   }
 
   async connect() {
@@ -53,6 +55,15 @@ class ArduinoSerialBridge {
 
         this.parser = this.port.pipe(new ReadlineParser({ delimiter: '\r\n' }));
         this.parser.on('data', (line) => this.handleSerialData(line.trim()));
+
+        // Trigger onConnect callback to sync live election candidate count with Arduino
+        if (this.onConnectCallback) {
+          try {
+            this.onConnectCallback();
+          } catch (cbErr) {
+            console.error('[SERIAL ONCONNECT ERROR]', cbErr);
+          }
+        }
 
         this.port.on('close', () => {
           this.isConnected = false;

@@ -206,6 +206,18 @@ arduinoBridge.setCallbacks({
   onReset: async () => {
     console.log('[HARDWARE EVENT] Pin 7 Reset (3s) triggered on Arduino.');
     broadcast('HARDWARE_EVENT', { action: 'RESET', message: 'Hardware tallies reset' });
+  },
+  onConnect: async () => {
+    try {
+      const live = await getLiveElection();
+      if (live && live.candidates && live.candidates.length > 0) {
+        console.log(`[SERIAL SYNC] Auto-syncing Arduino candidate count to ${live.candidates.length} for live election "${live.title}".`);
+        arduinoBridge.setCandidateCount(live.candidates.length);
+        arduinoBridge.startVoting();
+      }
+    } catch (err) {
+      console.error('[SERIAL SYNC ERROR]', err);
+    }
   }
 });
 
