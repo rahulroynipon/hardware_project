@@ -2,6 +2,7 @@
 #include <LiquidCrystal_I2C.h>
 #include <Wire.h>
 #include <string.h>
+#include <ctype.h>
 
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
@@ -70,6 +71,7 @@ void publishResults();
 void resetElection();
 void powerOffMachine();
 void powerOnMachine();
+void castVote(byte candidate, bool isRemote = false);
 void logEvent(const char *event, char candidate, const char *message);
 void logStatistics();
 void showWelcome();
@@ -212,25 +214,23 @@ void showStandbyScreen() {
 void showReadyScreen() {
   lcd.clear();
 
-  lcd.setCursor(0, 0);
-  lcd.print("A:");
-  lcd.print(votes[0]);
-  lcd.print(" B:");
-  lcd.print(votes[1]);
+  char row0[17];
+  char row1[17];
 
-  lcd.setCursor(0, 1);
+  snprintf(row0, sizeof(row0), "A:%-4u  B:%-4u", votes[0], votes[1]);
+
   if (activeCandidateCount == 2) {
-    lcd.print("[2 CANDIDATES]");
+    snprintf(row1, sizeof(row1), "[2 CANDIDATES]  ");
   } else if (activeCandidateCount == 3) {
-    lcd.print("C:");
-    lcd.print(votes[2]);
-    lcd.print(" [3 CAND]");
+    snprintf(row1, sizeof(row1), "C:%-4u  [3 CAND]", votes[2]);
   } else {
-    lcd.print("C:");
-    lcd.print(votes[2]);
-    lcd.print(" D:");
-    lcd.print(votes[3]);
+    snprintf(row1, sizeof(row1), "C:%-4u  D:%-4u", votes[2], votes[3]);
   }
+
+  lcd.setCursor(0, 0);
+  lcd.print(row0);
+  lcd.setCursor(0, 1);
+  lcd.print(row1);
 
   messageActive = false;
 }
@@ -366,44 +366,70 @@ void startVoting() {
 
 // ---------- Voting ----------
 
-void castVote(byte candidate) {
+void castVote(byte candidate, bool isRemote) {
   // Guard 1: Must be started first via start click
   if (machineState == STATE_STANDBY) {
-    digitalWrite(greenLED, LOW);
-    digitalWrite(redLED, HIGH);
+    if (isRemote) {
+      // Auto-start voting session if triggered remotely from web dashboard
+      machineState = STATE_VOTING;
+      lastButtonActionTime = millis();
+      votingStartTime = millis();
+      saveElection();
+      digitalWrite(greenLED, HIGH);
+      digitalWrite(redLED, LOW);
+    } else {
+      digitalWrite(greenLED, LOW);
+      digitalWrite(redLED, HIGH);
 
-    logEvent("VOTE_BLOCKED", candidateNames[candidate], "VotingNotStarted");
+      logEvent("VOTE_BLOCKED", candidateNames[candidate], "VotingNotStarted");
 
-    showMessage("NOT STARTED", "Press to Start", 1500);
-    digitalWrite(redLED, LOW);
-    return;
+      showMessage("NOT STARTED", "Press to Start", 1500);
+      digitalWrite(redLED, LOW);
+      return;
+    }
   }
 
   // Guard 2: If published, voting is closed
   if (machineState == STATE_PUBLISHED) {
-    digitalWrite(greenLED, LOW);
-    digitalWrite(redLED, HIGH);
+    if (isRemote) {
+      // Remote vote from live active web dashboard forces machine into voting state
+      machineState = STATE_VOTING;
+      lastButtonActionTime = millis();
+      votingStartTime = millis();
+      saveElection();
+      digitalWrite(greenLED, HIGH);
+      digitalWrite(redLED, LOW);
+    } else {
+      digitalWrite(greenLED, LOW);
+      digitalWrite(redLED, HIGH);
 
-    logEvent("VOTE_BLOCKED", candidateNames[candidate], "ResultPublished");
+      logEvent("VOTE_BLOCKED", candidateNames[candidate], "ResultPublished");
 
-    showMessage("RESULT PUBLISHED", "Voting is closed", 1500);
-    return;
+      showMessage("RESULT PUBLISHED", "Voting is closed", 1500);
+      return;
+    }
   }
 
   // Guard 3: Reject votes if candidate slot is not active in this election (e.g., only 2 members configured)
   if (candidate >= activeCandidateCount) {
-    digitalWrite(greenLED, LOW);
-    digitalWrite(redLED, HIGH);
+    if (isRemote) {
+      // Auto-expand candidate slots to accommodate live election candidate
+      activeCandidateCount = candidate + 1;
+      if (activeCandidateCount > 4) activeCandidateCount = 4;
+    } else {
+      digitalWrite(greenLED, LOW);
+      digitalWrite(redLED, HIGH);
 
-    logEvent("VOTE_BLOCKED", candidateNames[candidate], "CandidateSlotDisabled");
+      logEvent("VOTE_BLOCKED", candidateNames[candidate], "CandidateSlotDisabled");
 
-    char msg[17];
-    snprintf(msg, sizeof(msg), "Only %d Active", activeCandidateCount);
-    showMessage("  NO CANDIDATE  ", " SLOT DISABLED  ", 1500);
+      char msg[17];
+      snprintf(msg, sizeof(msg), "Only %d Active", activeCandidateCount);
+      showMessage("  NO CANDIDATE  ", " SLOT DISABLED  ", 1500);
 
-    digitalWrite(redLED, (machineState == STATE_PUBLISHED) ? HIGH : LOW);
-    digitalWrite(greenLED, (machineState == STATE_VOTING) ? HIGH : LOW);
-    return;
+      digitalWrite(redLED, (machineState == STATE_PUBLISHED) ? HIGH : LOW);
+      digitalWrite(greenLED, (machineState == STATE_VOTING) ? HIGH : LOW);
+      return;
+    }
   }
 
   // Prevent uint16_t vote counter overflow
@@ -424,7 +450,11 @@ void castVote(byte candidate) {
   delay(120);
   digitalWrite(greenLED, HIGH);
 
-  logEvent("VOTE", candidateNames[candidate], "VoteRecorded");
+  if (isRemote) {
+    logEvent("REMOTE_VOTE", candidateNames[candidate], "RemoteVoteRecorded");
+  } else {
+    logEvent("VOTE", candidateNames[candidate], "VoteRecorded");
+  }
 
   char line2[17];
   snprintf(line2, sizeof(line2), "Candidate %c", candidateNames[candidate]);
@@ -550,18 +580,55 @@ void processSerialCommand(const char *cmd) {
     logStatistics();
   } else if (strcasecmp(cmd, "PING") == 0) {
     logEvent("PONG", '-', "DeviceOnline");
-  } else if (strncasecmp(cmd, "VOTE", 4) == 0) {
-    logEvent("VOTE_BLOCKED", '?', "PhysicalVotingOnly");
-  } else if (strcasecmp(cmd, "START") == 0 || strcasecmp(cmd, "START_VOTING") == 0) {
-    if (machineState == STATE_STANDBY) {
-      startVoting();
-    }
-  } else if (strcasecmp(cmd, "PUBLISH") == 0 || strcasecmp(cmd, "CLOSE") == 0) {
-    if (machineState == STATE_VOTING) {
-      publishResults();
+  } else if (strncasecmp(cmd, "VOTE", 4) == 0 || strncasecmp(cmd, "SIM_VOTE", 8) == 0) {
+    // Format: VOTE:A, VOTE:B, VOTE A, SIM_VOTE:A, etc.
+    const char *p = strchr(cmd, ':');
+    if (!p) p = strchr(cmd, '=');
+    if (!p) p = strchr(cmd, ' ');
+    if (!p) p = strchr(cmd, '_');
+
+    char slotChar = 0;
+    if (p) {
+      p++;
+      while (*p == ' ') p++;
+      slotChar = (char)toupper(*p);
     } else {
-      logEvent("INFO", '-', "AlreadyClosedOrNotStarted");
+      size_t len = strlen(cmd);
+      if (len > 4) {
+        slotChar = (char)toupper(cmd[len - 1]);
+      }
     }
+
+    if (slotChar >= 'A' && slotChar <= 'D') {
+      byte candIndex = slotChar - 'A';
+      castVote(candIndex, true); // true = remote/simulated vote from Web Console
+    } else {
+      logEvent("VOTE_ERROR", '?', "InvalidCandidateSlot");
+    }
+  } else if (strncasecmp(cmd, "SYNC:", 5) == 0 || strncasecmp(cmd, "SET_VOTES:", 10) == 0) {
+    const char *p = strchr(cmd, ':');
+    if (p) {
+      p++;
+      int v0 = 0, v1 = 0, v2 = 0, v3 = 0;
+      if (sscanf(p, "%d,%d,%d,%d", &v0, &v1, &v2, &v3) >= 1) {
+        votes[0] = (uint16_t)(v0 >= 0 ? v0 : 0);
+        votes[1] = (uint16_t)(v1 >= 0 ? v1 : 0);
+        votes[2] = (uint16_t)(v2 >= 0 ? v2 : 0);
+        votes[3] = (uint16_t)(v3 >= 0 ? v3 : 0);
+        machineState = STATE_VOTING;
+        lastButtonActionTime = millis();
+        votingStartTime = millis();
+        saveElection();
+        digitalWrite(greenLED, HIGH);
+        digitalWrite(redLED, LOW);
+        showReadyScreen();
+        logEvent("SYNC_OK", '-', "TalliesSynced");
+      }
+    }
+  } else if (strcasecmp(cmd, "START") == 0 || strcasecmp(cmd, "START_VOTING") == 0) {
+    startVoting();
+  } else if (strcasecmp(cmd, "PUBLISH") == 0 || strcasecmp(cmd, "CLOSE") == 0) {
+    publishResults();
   } else if (strcasecmp(cmd, "RESET") == 0) {
     resetElection();
   } else if (strcasecmp(cmd, "POWER_OFF") == 0 || strcasecmp(cmd, "SLEEP") == 0) {

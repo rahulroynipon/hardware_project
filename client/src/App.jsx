@@ -189,6 +189,7 @@ export default function App() {
         onClose={() => setIsHardwareModalOpen(false)}
         isHardwareConnected={isHardwareConnected}
         liveElection={liveElection}
+        publishedElection={selectedElection?.status === 'published' ? selectedElection : elections.find((e) => e.status === 'published')}
       />
     </div>
   );

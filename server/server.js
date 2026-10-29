@@ -92,6 +92,8 @@ async function createAutoLiveElection() {
 
     console.log(`[AUTO-ELECTION] Created instant live election: ${title} (${id}) with 4 candidates.`);
     arduinoBridge.setCandidateCount(4);
+    arduinoBridge.startVoting();
+    setTimeout(() => arduinoBridge.syncTallies([0, 0, 0, 0]), 200);
 
     const created = await getLiveElection();
     broadcast('ELECTION_CREATED', created);
@@ -107,9 +109,20 @@ async function createAutoLiveElection() {
 }
 
 // ---------- Helper: Cast Vote by Slot (A, B, C, D) ----------
-async function castVoteBySlot(slot) {
+async function castVoteBySlot(slot, { fromHardware = false } = {}) {
   let liveElection = await getLiveElection();
   if (!liveElection) {
+    const { rows } = await pool.query("SELECT * FROM elections ORDER BY updated_at DESC, created_at DESC LIMIT 1;");
+    if (rows.length > 0 && rows[0].status === 'published') {
+      const pub = rows[0];
+      console.log(`[VOTE BLOCKED] Voting is closed. "${pub.title}" is already published (Winner: ${pub.winner}).`);
+      return {
+        isPublished: true,
+        winner: pub.winner,
+        electionTitle: pub.title,
+        error: `Voting is closed. "${pub.title}" is permanently published. Winner: ${pub.winner}`
+      };
+    }
     console.log(`[VOTE] No live election. Auto-creating live election for vote slot ${slot}...`);
     liveElection = await createAutoLiveElection();
   }
@@ -129,8 +142,8 @@ async function castVoteBySlot(slot) {
     await client.query('UPDATE candidates SET votes = votes + 1 WHERE id = $1;', [candidate.id]);
     await client.query(`
       INSERT INTO votes_log (election_id, candidate_id, slot, source)
-      VALUES ($1, $2, $3, 'hardware');
-    `, [liveElection.id, candidate.id, slot.toUpperCase()]);
+      VALUES ($1, $2, $3, $4);
+    `, [liveElection.id, candidate.id, slot.toUpperCase(), fromHardware ? 'hardware' : 'web']);
 
     await client.query('COMMIT');
 
@@ -138,6 +151,11 @@ async function castVoteBySlot(slot) {
     const totalVotes = liveElection.candidates.reduce((sum, c) => sum + (c.votes || 0), 0);
 
     console.log(`[VOTE CAST] ${candidate.name} (Slot ${slot}) -> Total: ${candidate.votes} votes. Aggregate: ${totalVotes}`);
+
+    // If vote was initiated from Web UI, tell physical Arduino Uno to record vote & update LCD display
+    if (!fromHardware) {
+      arduinoBridge.simulateVote(slot.toUpperCase());
+    }
 
     broadcast('VOTE_CAST', {
       electionId: liveElection.id,
@@ -159,10 +177,67 @@ async function castVoteBySlot(slot) {
   }
 }
 
+// ---------- Unified Helper: Close & Publish Live Election on Web & Arduino ----------
+async function closeAndPublishLiveElection(electionId = null) {
+  let election = null;
+  if (electionId) {
+    const { rows } = await pool.query('SELECT * FROM elections WHERE id = $1;', [electionId]);
+    if (rows.length === 0) return null;
+    election = rows[0];
+  } else {
+    election = await getLiveElection();
+  }
+
+  if (!election) return null;
+
+  const candRes = await pool.query('SELECT * FROM candidates WHERE election_id = $1 ORDER BY ballot_order ASC;', [election.id]);
+  const candidates = candRes.rows;
+
+  let highest = -1;
+  let winner = 'No Votes Cast';
+  let tie = false;
+
+  candidates.forEach(c => {
+    if (c.votes > highest) {
+      highest = c.votes;
+      winner = c.name;
+      tie = false;
+    } else if (c.votes === highest && highest > 0) {
+      tie = true;
+    }
+  });
+
+  if (tie) winner = 'Tie - Multiple Winners';
+  if (highest <= 0) winner = 'No Votes Cast';
+
+  await pool.query("UPDATE elections SET status = 'published', winner = $1, updated_at = NOW() WHERE id = $2;", [winner, election.id]);
+
+  election.status = 'published';
+  election.winner = winner;
+  election.candidates = candidates;
+
+  // Sync latest tallies to Arduino and then tell it to publish results and illuminate Red LED
+  const tallies = [0, 0, 0, 0];
+  candidates.forEach(c => {
+    const idx = (c.slot || '').toUpperCase().charCodeAt(0) - 65;
+    if (idx >= 0 && idx < 4) tallies[idx] = c.votes || 0;
+  });
+  arduinoBridge.syncTallies(tallies);
+  setTimeout(() => {
+    arduinoBridge.publishResults();
+  }, 150);
+
+  broadcast('ELECTION_UPDATED', election);
+  broadcast('HARDWARE_EVENT', { action: 'PUBLISH', election, winner });
+
+  console.log(`[ELECTION PUBLISHED] "${election.title}" sealed. Winner: ${winner}`);
+  return election;
+}
+
 // ---------- Wire Up Arduino Hardware Events ----------
 arduinoBridge.setCallbacks({
   onVote: (slot) => {
-    castVoteBySlot(slot).catch(console.error);
+    castVoteBySlot(slot, { fromHardware: true }).catch(console.error);
   },
   onStart: () => {
     console.log('[HARDWARE EVENT] Pin 7 Start Voting pressed on Arduino.');
@@ -175,33 +250,7 @@ arduinoBridge.setCallbacks({
   },
   onPublish: async () => {
     console.log('[HARDWARE EVENT] Pin 7 Publish pressed on Arduino.');
-    const live = await getLiveElection();
-    if (live) {
-      // Find winner
-      let highest = -1;
-      let winnerName = 'Tie / No Votes';
-      let tie = false;
-
-      live.candidates.forEach(c => {
-        if (c.votes > highest) {
-          highest = c.votes;
-          winnerName = c.name;
-          tie = false;
-        } else if (c.votes === highest && highest > 0) {
-          tie = true;
-        }
-      });
-
-      if (tie) winnerName = 'Tie - Multiple Winners';
-      if (highest <= 0) winnerName = 'No Votes Cast';
-
-      await pool.query("UPDATE elections SET status = 'published', winner = $1, updated_at = NOW() WHERE id = $2;", [winnerName, live.id]);
-      live.status = 'published';
-      live.winner = winnerName;
-
-      broadcast('ELECTION_UPDATED', live);
-      broadcast('HARDWARE_EVENT', { action: 'PUBLISH', election: live, winner: winnerName });
-    }
+    await closeAndPublishLiveElection();
   },
   onReset: async () => {
     console.log('[HARDWARE EVENT] Pin 7 Reset (3s) triggered on Arduino.');
@@ -214,6 +263,17 @@ arduinoBridge.setCallbacks({
         console.log(`[SERIAL SYNC] Auto-syncing Arduino candidate count to ${live.candidates.length} for live election "${live.title}".`);
         arduinoBridge.setCandidateCount(live.candidates.length);
         arduinoBridge.startVoting();
+
+        const tallies = [0, 0, 0, 0];
+        live.candidates.forEach((c) => {
+          const idx = (c.slot || '').toUpperCase().charCodeAt(0) - 65;
+          if (idx >= 0 && idx < 4) {
+            tallies[idx] = c.votes || 0;
+          }
+        });
+        setTimeout(() => {
+          arduinoBridge.syncTallies(tallies);
+        }, 300);
       }
     } catch (err) {
       console.error('[SERIAL SYNC ERROR]', err);
@@ -469,6 +529,13 @@ app.post('/api/elections/:id/live', async (req, res) => {
     arduinoBridge.setCandidateCount(candRes.rows.length);
     arduinoBridge.startVoting();
 
+    const tallies = [0, 0, 0, 0];
+    candRes.rows.forEach((c) => {
+      const idx = (c.slot || '').toUpperCase().charCodeAt(0) - 65;
+      if (idx >= 0 && idx < 4) tallies[idx] = c.votes || 0;
+    });
+    setTimeout(() => arduinoBridge.syncTallies(tallies), 300);
+
     broadcast('ELECTION_UPDATED', election);
     res.json({ success: true, election });
   } catch (err) {
@@ -482,56 +549,14 @@ app.post('/api/elections/:id/live', async (req, res) => {
 // 5. End & Publish Election (Permanent lock)
 app.post('/api/elections/:id/publish', async (req, res) => {
   const { id } = req.params;
-
-  const client = await pool.connect();
   try {
-    await client.query('BEGIN');
-
-    const { rows } = await client.query('SELECT * FROM elections WHERE id = $1;', [id]);
-    if (rows.length === 0) {
-      await client.query('ROLLBACK');
+    const election = await closeAndPublishLiveElection(id);
+    if (!election) {
       return res.status(404).json({ success: false, error: 'Election not found' });
     }
-
-    const election = rows[0];
-    const candRes = await client.query('SELECT * FROM candidates WHERE election_id = $1 ORDER BY ballot_order ASC;', [id]);
-    const candidates = candRes.rows;
-
-    let highest = -1;
-    let winner = 'No Votes Cast';
-    let tie = false;
-
-    candidates.forEach(c => {
-      if (c.votes > highest) {
-        highest = c.votes;
-        winner = c.name;
-        tie = false;
-      } else if (c.votes === highest && highest > 0) {
-        tie = true;
-      }
-    });
-
-    if (tie) winner = 'Tie - Multiple Winners';
-    if (highest <= 0) winner = 'No Votes Cast';
-
-    await client.query("UPDATE elections SET status = 'published', winner = $1, updated_at = NOW() WHERE id = $2;", [winner, id]);
-
-    election.status = 'published';
-    election.winner = winner;
-    election.candidates = candidates;
-
-    await client.query('COMMIT');
-
-    // Notify physical Arduino to close voting and illuminate Red LED
-    arduinoBridge.publishResults();
-
-    broadcast('ELECTION_UPDATED', election);
     res.json({ success: true, election });
   } catch (err) {
-    await client.query('ROLLBACK');
     res.status(500).json({ success: false, error: err.message });
-  } finally {
-    client.release();
   }
 });
 
@@ -571,9 +596,12 @@ app.post('/api/voting/vote', async (req, res) => {
   }
 
   try {
-    const result = await castVoteBySlot(slot.toUpperCase());
+    const result = await castVoteBySlot(slot.toUpperCase(), { fromHardware: false });
     if (!result) {
       return res.status(400).json({ success: false, error: `Candidate slot ${slot} is disabled in the active election.` });
+    }
+    if (result.isPublished) {
+      return res.status(400).json({ success: false, isPublished: true, winner: result.winner, error: result.error });
     }
     res.json({ success: true, result });
   } catch (err) {
@@ -589,7 +617,7 @@ app.post('/api/hardware/action', (req, res) => {
       arduinoBridge.startVoting();
       break;
     case 'PUBLISH':
-      arduinoBridge.publishResults();
+      closeAndPublishLiveElection().catch(console.error);
       break;
     case 'RESET':
       arduinoBridge.resetMachine();
@@ -602,6 +630,20 @@ app.post('/api/hardware/action', (req, res) => {
       break;
     case 'SET_COUNT':
       if (count >= 2 && count <= 4) arduinoBridge.setCandidateCount(count);
+      break;
+    case 'SYNC':
+      getLiveElection().then((liveSync) => {
+        if (liveSync && liveSync.candidates) {
+          const tallies = [0, 0, 0, 0];
+          liveSync.candidates.forEach((c) => {
+            const idx = (c.slot || '').toUpperCase().charCodeAt(0) - 65;
+            if (idx >= 0 && idx < 4) tallies[idx] = c.votes || 0;
+          });
+          arduinoBridge.setCandidateCount(liveSync.candidates.length);
+          arduinoBridge.startVoting();
+          setTimeout(() => arduinoBridge.syncTallies(tallies), 250);
+        }
+      }).catch(console.error);
       break;
     default:
       return res.status(400).json({ success: false, error: 'Unknown hardware action' });
@@ -617,6 +659,82 @@ app.get('/api/hardware/status', async (req, res) => {
     port: arduinoBridge.portPath,
     liveElection: live ? { id: live.id, title: live.title, candidateCount: live.candidates.length } : null
   });
+});
+
+// 8.5 Sync live election candidates & votes to Arduino LCD
+app.post('/api/hardware/sync', async (req, res) => {
+  try {
+    const live = await getLiveElection();
+    if (!live || !live.candidates || live.candidates.length === 0) {
+      return res.status(400).json({ success: false, error: 'No live election currently active to sync.' });
+    }
+
+    const tallies = [0, 0, 0, 0];
+    live.candidates.forEach((c) => {
+      const idx = (c.slot || '').toUpperCase().charCodeAt(0) - 65;
+      if (idx >= 0 && idx < 4) {
+        tallies[idx] = c.votes || 0;
+      }
+    });
+
+    arduinoBridge.setCandidateCount(live.candidates.length);
+    arduinoBridge.startVoting();
+    setTimeout(() => {
+      arduinoBridge.syncTallies(tallies);
+    }, 250);
+
+    console.log(`[HARDWARE SYNC] Synced "${live.title}" (${live.candidates.length} candidates, tallies: ${tallies.join(',')}) to Arduino.`);
+    res.json({
+      success: true,
+      message: `Synchronized "${live.title}" with Arduino display`,
+      election: live.title,
+      candidateCount: live.candidates.length,
+      tallies: {
+        A: tallies[0],
+        B: tallies[1],
+        C: tallies[2],
+        D: tallies[3]
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 9. Hardware firmware upload / flash endpoint
+app.post('/api/hardware/flash', async (req, res) => {
+  const { exec } = await import('child_process');
+  const path = await import('path');
+
+  try {
+    console.log('[HARDWARE FLASH] Closing serial port for firmware flashing...');
+    await arduinoBridge.disconnect();
+    await new Promise(r => setTimeout(r, 1200));
+
+    const cliPath = '/Applications/Arduino IDE.app/Contents/Resources/app/lib/backend/resources/arduino-cli';
+    const sketchPath = path.resolve(process.cwd(), '../digital_voting_machine');
+    const port = arduinoBridge.portPath;
+
+    console.log(`[HARDWARE FLASH] Running arduino-cli compile --upload on ${port}...`);
+
+    exec(`"${cliPath}" compile --upload -p "${port}" --fqbn arduino:avr:uno "${sketchPath}"`, async (err, stdout, stderr) => {
+      // Re-establish connection after flash finishes
+      setTimeout(() => {
+        arduinoBridge.connect();
+      }, 1500);
+
+      if (err) {
+        console.error('[HARDWARE FLASH ERROR]', stderr || stdout || err.message);
+        return res.status(500).json({ success: false, error: stderr || stdout || err.message });
+      }
+
+      console.log('[HARDWARE FLASH SUCCESS]', stdout);
+      return res.json({ success: true, message: 'Arduino firmware updated and flashed successfully!', output: stdout });
+    });
+  } catch (err) {
+    arduinoBridge.connect();
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // Start Server & Connect to PostgreSQL + Serial

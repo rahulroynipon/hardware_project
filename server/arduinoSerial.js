@@ -27,6 +27,7 @@ class ArduinoSerialBridge {
   }
 
   async connect() {
+    this.isManualDisconnect = false;
     try {
       const ports = await SerialPort.list();
       const arduinoPort = ports.find(p => 
@@ -67,8 +68,12 @@ class ArduinoSerialBridge {
 
         this.port.on('close', () => {
           this.isConnected = false;
-          console.log('[SERIAL] Arduino disconnected. Reconnecting in 5s...');
-          this.scheduleReconnect();
+          if (!this.isManualDisconnect) {
+            console.log('[SERIAL] Arduino disconnected. Reconnecting in 5s...');
+            this.scheduleReconnect();
+          } else {
+            console.log('[SERIAL] Port closed for firmware update.');
+          }
         });
 
         this.port.on('error', (portErr) => {
@@ -80,6 +85,35 @@ class ArduinoSerialBridge {
       console.log(`[SERIAL] Connect error: ${e.message}. Retrying in 5s...`);
       this.scheduleReconnect();
     }
+  }
+
+  disconnect() {
+    this.isManualDisconnect = true;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    return new Promise((resolve) => {
+      const finish = () => {
+        this.isConnected = false;
+        this.port = null;
+        this.parser = null;
+        setTimeout(resolve, 800);
+      };
+
+      if (this.port && this.port.isOpen) {
+        try {
+          if (this.parser) this.port.unpipe(this.parser);
+        } catch (e) {}
+
+        this.port.close((err) => {
+          if (err) console.error('[SERIAL CLOSE ERR]', err.message);
+          finish();
+        });
+      } else {
+        finish();
+      }
+    });
   }
 
   scheduleReconnect() {
@@ -99,7 +133,15 @@ class ArduinoSerialBridge {
 
       if (event === 'VOTE' && ['A', 'B', 'C', 'D'].includes(cand)) {
         if (this.onVoteCallback) this.onVoteCallback(cand);
+      } else if (event === 'REMOTE_VOTE') {
+        console.log(`[ARDUINO ACK] Simulated vote recorded on Arduino LCD for Candidate ${cand}`);
       } else if (event === 'START') {
+        if (parts[parts.length - 1] === 'MachineReady') {
+          console.log('[ARDUINO] Arduino boot completed. Synchronizing state...');
+          if (this.onConnectCallback) {
+            try { this.onConnectCallback(); } catch (e) { console.error('[ONCONNECT ERROR]', e); }
+          }
+        }
         if (this.onStartCallback) this.onStartCallback();
       } else if (event === 'RESULT') {
         if (this.onPublishCallback) this.onPublishCallback();
@@ -117,6 +159,22 @@ class ArduinoSerialBridge {
       });
     } else {
       console.log(`[SERIAL SKIP] Hardware not connected. Command: ${command}`);
+    }
+  }
+
+  simulateVote(slot) {
+    this.send(`VOTE:${slot.toUpperCase()}`);
+  }
+
+  syncTallies(tallies) {
+    if (Array.isArray(tallies)) {
+      this.send(`SYNC:${tallies.slice(0, 4).join(',')}`);
+    } else if (tallies && typeof tallies === 'object') {
+      const a = tallies.A ?? tallies[0] ?? 0;
+      const b = tallies.B ?? tallies[1] ?? 0;
+      const c = tallies.C ?? tallies[2] ?? 0;
+      const d = tallies.D ?? tallies[3] ?? 0;
+      this.send(`SYNC:${a},${b},${c},${d}`);
     }
   }
 

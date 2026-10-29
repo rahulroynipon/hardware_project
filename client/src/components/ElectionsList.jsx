@@ -72,12 +72,7 @@ export default function ElectionsList({
             />
           </div>
 
-          <select className="form-select" style={{ width: '130px', padding: '8px 12px' }}>
-            <option>All Dates</option>
-            <option>Today</option>
-            <option>This Week</option>
-            <option>This Month</option>
-          </select>
+    
         </div>
       </div>
 

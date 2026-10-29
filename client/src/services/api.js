@@ -82,6 +82,26 @@ export async function triggerHardwareAction(action, count) {
   return res.json();
 }
 
+export async function flashHardwareFirmware() {
+  const res = await fetch(`${API_BASE}/hardware/flash`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to flash firmware');
+  return data;
+}
+
+export async function syncLiveElectionToHardware() {
+  const res = await fetch(`${API_BASE}/hardware/sync`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to sync live votes');
+  return data;
+}
+
 // WebSocket Live Telemetry
 export function connectWebSocket(onMessage, onStatusChange) {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
