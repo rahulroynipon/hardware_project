@@ -1,0 +1,243 @@
+{
+  "elections": [
+    {
+      "id": "elec-1",
+      "title": "Student Council Election 2024-2025",
+      "description": "Annual general election for the student council executive board. Vote for your preferred campus leaders.",
+      "organization": "Student Council",
+      "type": "Scheduled",
+      "startDate": "Dec 15, 2024",
+      "startTime": "10:00 AM",
+      "endDate": "Dec 15, 2024",
+      "endTime": "05:00 PM",
+      "status": "live",
+      "totalVoters": 1600,
+      "timeRemaining": "2h 15m 32s",
+      "candidates": [
+        {
+          "id": "cand-1",
+          "name": "Sarah Johnson",
+          "slot": "A",
+          "order": 1,
+          "votes": 580,
+          "bio": "A dedicated student leader committed to improving campus life, mental health resources, and dining facilities.",
+          "photo": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80"
+        },
+        {
+          "id": "cand-2",
+          "name": "Michael Chen",
+          "slot": "B",
+          "order": 2,
+          "votes": 350,
+          "bio": "Passionate about technological innovation, career development workshops, and creating research opportunities.",
+          "photo": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=400&q=80"
+        },
+        {
+          "id": "cand-3",
+          "name": "Priya Patel",
+          "slot": "C",
+          "order": 3,
+          "votes": 320,
+          "bio": "Focused on building a more inclusive, diverse, and vibrant university community with better student spaces.",
+          "photo": "https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=400&q=80"
+        }
+      ]
+    },
+    {
+      "id": "elec-2",
+      "title": "Sports Committee Election",
+      "description": "Election of new student captains and sports council representatives.",
+      "organization": "Sports Committee",
+      "type": "Scheduled",
+      "startDate": "Jan 10, 2025",
+      "startTime": "10:00 AM",
+      "endDate": "Jan 10, 2025",
+      "endTime": "05:00 PM",
+      "status": "draft",
+      "totalVoters": 800,
+      "candidates": [
+        {
+          "id": "cand-4",
+          "name": "Alex Morgan",
+          "slot": "A",
+          "order": 1,
+          "votes": 0,
+          "bio": "Varsity athletics captain promoting athletic facilities improvement.",
+          "photo": "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=400&q=80"
+        },
+        {
+          "id": "cand-5",
+          "name": "Jordan Smith",
+          "slot": "B",
+          "order": 2,
+          "votes": 0,
+          "bio": "Intramural sports coordinator aiming for campus-wide tournaments.",
+          "photo": "https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?auto=format&fit=crop&w=400&q=80"
+        }
+      ]
+    },
+    {
+      "id": "elec-3",
+      "title": "IT Club Election",
+      "description": "Executive election for the City University Information Technology & Coding Society.",
+      "organization": "IT Club",
+      "type": "Scheduled",
+      "startDate": "Nov 20, 2024",
+      "startTime": "10:00 AM",
+      "endDate": "Nov 20, 2024",
+      "endTime": "05:00 PM",
+      "status": "published",
+      "totalVoters": 650,
+      "winner": "Evelyn Reed",
+      "candidates": [
+        {
+          "id": "cand-6",
+          "name": "Evelyn Reed",
+          "slot": "A",
+          "order": 1,
+          "votes": 340,
+          "bio": "Organized hackathons and AI research student seminars.",
+          "photo": "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=400&q=80"
+        },
+        {
+          "id": "cand-7",
+          "name": "Liam Vance",
+          "slot": "B",
+          "order": 2,
+          "votes": 260,
+          "bio": "Cybersecurity club lead and open source contributor.",
+          "photo": "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=400&q=80"
+        }
+      ]
+    },
+    {
+      "id": "elec-4",
+      "title": "Arts Society Election",
+      "description": "Leadership election for drama, photography, and fine arts club heads.",
+      "organization": "Arts Society",
+      "type": "Instant",
+      "startDate": "Jan 15, 2025",
+      "startTime": "10:00 AM",
+      "endDate": "Jan 15, 2025",
+      "endTime": "05:00 PM",
+      "status": "draft",
+      "totalVoters": 450,
+      "candidates": [
+        {
+          "id": "cand-8",
+          "name": "Lucas Grey",
+          "slot": "A",
+          "order": 1,
+          "votes": 0,
+          "bio": "Fine arts student passionate about campus exhibitions.",
+          "photo": "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&w=400&q=80"
+        },
+        {
+          "id": "cand-9",
+          "name": "Chloe Bennett",
+          "slot": "B",
+          "order": 2,
+          "votes": 0,
+          "bio": "Theater production director creating student stage plays.",
+          "photo": "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=400&q=80"
+        }
+      ]
+    },
+    {
+      "id": "elec-5",
+      "title": "Engineering Representative",
+      "description": "Department faculty representative election for engineering students.",
+      "organization": "Engineering",
+      "type": "Scheduled",
+      "startDate": "Feb 01, 2025",
+      "startTime": "10:00 AM",
+      "endDate": "Feb 01, 2025",
+      "endTime": "05:00 PM",
+      "status": "published",
+      "totalVoters": 950,
+      "winner": "Marcus Thorne",
+      "candidates": [
+        {
+          "id": "cand-10",
+          "name": "Marcus Thorne",
+          "slot": "A",
+          "order": 1,
+          "votes": 520,
+          "bio": "Mechanical engineering student advocate for lab equipment upgrades.",
+          "photo": "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&w=400&q=80"
+        },
+        {
+          "id": "cand-11",
+          "name": "Samantha Wu",
+          "slot": "B",
+          "order": 2,
+          "votes": 390,
+          "bio": "Electrical engineering peer mentor.",
+          "photo": "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=400&q=80"
+        }
+      ]
+    },
+    {
+      "id": "elec-6",
+      "title": "Cultural Club Election",
+      "description": "Annual election for university cultural gala committee members.",
+      "organization": "Cultural Club",
+      "type": "Scheduled",
+      "startDate": "Mar 12, 2025",
+      "startTime": "10:00 AM",
+      "endDate": "Mar 12, 2025",
+      "endTime": "05:00 PM",
+      "status": "draft",
+      "totalVoters": 500,
+      "candidates": []
+    },
+    {
+      "id": "elec-7",
+      "title": "Debate Club Election",
+      "description": "President and tournament organizer election.",
+      "organization": "Debate Club",
+      "type": "Scheduled",
+      "startDate": "Apr 05, 2025",
+      "startTime": "10:00 AM",
+      "endDate": "Apr 05, 2025",
+      "endTime": "05:00 PM",
+      "status": "draft",
+      "totalVoters": 350,
+      "candidates": []
+    },
+    {
+      "id": "elec-8",
+      "title": "Research Club Election",
+      "description": "Undergraduate research committee representative.",
+      "organization": "Research Club",
+      "type": "Scheduled",
+      "startDate": "May 18, 2025",
+      "startTime": "10:00 AM",
+      "endDate": "May 18, 2025",
+      "endTime": "05:00 PM",
+      "status": "published",
+      "totalVoters": 400,
+      "winner": "Daniel Garcia",
+      "candidates": [
+        {
+          "id": "cand-12",
+          "name": "Daniel Garcia",
+          "slot": "A",
+          "order": 1,
+          "votes": 240,
+          "bio": "Biomedical researcher.",
+          "photo": "https://images.unsplash.com/photo-1501196354995-cbb51c65aaea?auto=format&fit=crop&w=400&q=80"
+        },
+        {
+          "id": "cand-13",
+          "name": "Nina Patel",
+          "slot": "B",
+          "order": 2,
+          "votes": 140,
+          "bio": "Environmental science researcher.",
+          "photo": "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=400&q=80"
+        }
+      ]
+    }
+  ]
+}
