@@ -43,7 +43,11 @@ class ArduinoSerialBridge {
         p.path === this.portPath
       );
 
-      const targetPath = arduinoPort ? arduinoPort.path : this.portPath;
+      let targetPath = arduinoPort ? arduinoPort.path : this.portPath;
+      if (targetPath.startsWith('/dev/tty.')) {
+        targetPath = targetPath.replace('/dev/tty.', '/dev/cu.');
+      }
+      this.portPath = targetPath;
 
       this.port = new SerialPort({
         path: targetPath,
@@ -62,8 +66,11 @@ class ArduinoSerialBridge {
         this.isConnected = true;
         console.log(`[SERIAL] Connected to Arduino Uno at ${targetPath} @ 9600 baud.`);
 
-        this.parser = this.port.pipe(new ReadlineParser({ delimiter: '\r\n' }));
-        this.parser.on('data', (line) => this.handleSerialData(line.trim()));
+        this.parser = this.port.pipe(new ReadlineParser({ delimiter: '\n' }));
+        this.parser.on('data', (line) => {
+          const clean = line.trim();
+          if (clean) this.handleSerialData(clean);
+        });
 
         // Trigger onConnect callback to sync live election candidate count with Arduino
         if (this.onConnectCallback) {
@@ -135,9 +142,10 @@ class ArduinoSerialBridge {
     // CSV format: millis,event,candidate,A,B,C,D,total,closed,message
     const parts = line.split(',');
     if (parts.length >= 3) {
-      const event = parts[1];
-      const cand = parts[2];
-      console.log(`[ARDUINO EVENT] ${event} (cand: ${cand})`);
+      const event = parts[1].trim();
+      const cand = parts[2].trim();
+      const msg = parts[parts.length - 1].trim();
+      console.log(`[ARDUINO EVENT] ${event} (cand: ${cand}, msg: ${msg}) raw: ${line}`);
 
       if (event === 'VOTE' && ['A', 'B', 'C', 'D'].includes(cand)) {
         if (this.onVoteCallback) this.onVoteCallback(cand);
@@ -146,9 +154,9 @@ class ArduinoSerialBridge {
       } else if (event === 'INSPECT' || event === 'PAGE') {
         if (this.onInspectCallback) this.onInspectCallback(cand);
       } else if (event === 'VOTE_BLOCKED') {
-        if (this.onVoteBlockedCallback) this.onVoteBlockedCallback(cand, parts[parts.length - 1]);
+        if (this.onVoteBlockedCallback) this.onVoteBlockedCallback(cand, msg);
       } else if (event === 'START') {
-        if (parts[parts.length - 1] === 'MachineReady') {
+        if (msg === 'MachineReady') {
           console.log('[ARDUINO] Arduino boot completed. Synchronizing state...');
           if (this.onConnectCallback) {
             try { this.onConnectCallback(); } catch (e) { console.error('[ONCONNECT ERROR]', e); }

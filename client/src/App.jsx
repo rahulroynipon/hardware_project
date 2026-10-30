@@ -76,9 +76,14 @@ export default function App() {
           );
         } else if (msg.type === 'HARDWARE_EVENT') {
           setLastHardwareEvent({ ...msg.payload, _t: Date.now() });
+          if (msg.payload.action === 'PUBLISH' && msg.payload.election?.id) {
+            setSelectedElectionId(msg.payload.election.id);
+          }
           loadElections();
         } else if (msg.type === 'ELECTION_UPDATED' || msg.type === 'ELECTION_CREATED') {
-          // Full sync on status transitions
+          if (msg.payload?.id && msg.payload?.status === 'published') {
+            setSelectedElectionId(msg.payload.id);
+          }
           loadElections();
         }
       },

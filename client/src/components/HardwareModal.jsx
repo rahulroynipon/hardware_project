@@ -381,16 +381,16 @@ export default function HardwareModal({
                   width: '12px',
                   height: '12px',
                   borderRadius: '50%',
-                  background: (isGreenLedLit || greenBlink) ? '#22C55E' : '#14532D',
-                  boxShadow: (isGreenLedLit || greenBlink)
+                  background: isGreenLedLit ? '#22C55E' : '#14532D',
+                  boxShadow: isGreenLedLit
                     ? '0 0 10px #22C55E, inset 0 1px 2px rgba(255,255,255,0.7)'
                     : 'inset 0 1px 2px rgba(0,0,0,0.6)',
                   border: '1px solid #166534',
                   transition: 'all 0.1s ease'
                 }}
               ></span>
-              <span style={{ fontSize: '11px', fontWeight: 700, color: (isGreenLedLit || greenBlink) ? '#15803D' : '#64748B' }}>
-                Green LED (D8): {(isGreenLedLit || greenBlink) ? 'ON' : 'OFF'}
+              <span style={{ fontSize: '11px', fontWeight: 700, color: isGreenLedLit ? '#15803D' : '#64748B' }}>
+                Green LED (D8): {isGreenLedLit ? 'ON' : 'OFF'}
               </span>
             </div>
 
@@ -561,9 +561,11 @@ export default function HardwareModal({
         <div style={{ marginBottom: '18px' }}>
           <label className="form-label">Control Pin 7 Hardware Actions</label>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            <button className="btn-outline" onClick={() => handleTriggerAction('START')}>
-              {isStandby ? 'Start Voting (1 Click)' : isPublished ? 'Start New Live (1 Click)' : 'Restart Live (1 Click)'}
+        {
+          isStandby &&     <button className="btn-outline" onClick={() => handleTriggerAction('START')}>
+              Start Voting (1 Click)
             </button>
+        }
 
             {/* Only show Publish Results button when voting has actively started */}
             {isVoting && (
@@ -600,27 +602,16 @@ export default function HardwareModal({
             )}
 
             {isPublished && (
-              <>
-                <button
-                  className="btn-outline"
-                  style={{
-                    background: activeLcdView === 'TOTAL' ? '#E2E8F0' : '#F8FAFC',
-                    borderColor: '#94A3B8',
-                    color: '#334155',
-                    fontWeight: 700
-                  }}
-                  onClick={() => handleTriggerAction('SHOW_TOTAL')}
-                >
-                  👥 Total Votes (LCD)
-                </button>
+           
+                
                 <button
                   className="btn-outline"
                   style={{ background: '#F8FAFC', borderColor: '#94A3B8', color: '#334155', fontWeight: 700 }}
                   onClick={() => handleTriggerAction('CYCLE_STATS')}
                 >
-                  📊 Cycle LCD Screens
+                  📊 Results Screen
                 </button>
-              </>
+         
             )}
 
             <button className="btn-outline" onClick={() => handleTriggerAction('RESET')}>
@@ -645,10 +636,11 @@ export default function HardwareModal({
                 color: '#166534',
                 fontWeight: 700
               }}
+              title="Push web election tallies and state to adjust physical Arduino machine"
               disabled={isSyncing}
               onClick={handleSync}
             >
-              {isSyncing ? '🔄 Syncing...' : '🔄 Sync with Hardware'}
+              {isSyncing ? '🔄 Syncing to Hardware...' : '🔄 Sync Web to Hardware'}
             </button>
           </div>
         </div>

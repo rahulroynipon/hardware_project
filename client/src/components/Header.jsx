@@ -3,8 +3,7 @@ import React from 'react';
 export default function Header({ currentView, setCurrentView, isHardwareConnected, onOpenHardwareModal }) {
   return (
     <header className="top-header">
-      <div className='page-container'>
-           {/* Brand Section */}
+      {/* Brand Section */}
       <div className="brand-section" onClick={() => setCurrentView('dashboard')} style={{ cursor: 'pointer' }}>
         <div className="brand-logo-icon">
           CU
@@ -43,8 +42,6 @@ export default function Header({ currentView, setCurrentView, isHardwareConnecte
           <span>{isHardwareConnected ? 'Arduino Live' : 'Hardware Ready'}</span>
         </button>
       </div>
-      </div>
-   
     </header>
   );
 }

@@ -181,7 +181,7 @@ async function castVoteBySlot(slot, { fromHardware = false } = {}) {
 }
 
 // ---------- Unified Helper: Close & Publish Live Election on Web & Arduino ----------
-async function closeAndPublishLiveElection(electionId = null) {
+async function closeAndPublishLiveElection(electionId = null, { fromHardware = false } = {}) {
   let election = null;
   if (electionId) {
     const { rows } = await pool.query('SELECT * FROM elections WHERE id = $1;', [electionId]);
@@ -219,16 +219,18 @@ async function closeAndPublishLiveElection(electionId = null) {
   election.winner = winner;
   election.candidates = candidates;
 
-  // Sync latest tallies to Arduino and then tell it to publish results and illuminate Red LED
-  const tallies = [0, 0, 0, 0];
-  candidates.forEach(c => {
-    const idx = (c.slot || '').toUpperCase().charCodeAt(0) - 65;
-    if (idx >= 0 && idx < 4) tallies[idx] = c.votes || 0;
-  });
-  arduinoBridge.syncTallies(tallies);
-  setTimeout(() => {
-    arduinoBridge.publishResults();
-  }, 150);
+  // If initiated from Web, tell Arduino Uno to publish results & illuminate Red LED
+  if (!fromHardware) {
+    const tallies = [0, 0, 0, 0];
+    candidates.forEach(c => {
+      const idx = (c.slot || '').toUpperCase().charCodeAt(0) - 65;
+      if (idx >= 0 && idx < 4) tallies[idx] = c.votes || 0;
+    });
+    arduinoBridge.syncTallies(tallies);
+    setTimeout(() => {
+      arduinoBridge.publishResults();
+    }, 150);
+  }
 
   broadcast('ELECTION_UPDATED', election);
   broadcast('HARDWARE_EVENT', { action: 'PUBLISH', election, winner });
@@ -253,7 +255,7 @@ arduinoBridge.setCallbacks({
   },
   onPublish: async () => {
     console.log('[HARDWARE EVENT] Pin 7 Publish pressed on Arduino.');
-    await closeAndPublishLiveElection();
+    await closeAndPublishLiveElection(null, { fromHardware: true });
   },
   onReset: async () => {
     console.log('[HARDWARE EVENT] Pin 7 Reset (3s) triggered on Arduino.');
@@ -324,17 +326,9 @@ arduinoBridge.setCallbacks({
           }
         });
 
-        if (isPublishedSync) {
-          arduinoBridge.syncTallies(tallies);
-          setTimeout(() => {
-            arduinoBridge.publishResults();
-          }, 350);
-        } else {
-          arduinoBridge.startVoting();
-          setTimeout(() => {
-            arduinoBridge.syncTallies(tallies);
-          }, 350);
-        }
+        const targetState = isPublishedSync ? 'PUBLISHED' : 'VOTING';
+        arduinoBridge.syncState(targetState, tallies);
+        console.log(`[SERIAL SYNC] Adjusted hardware to ${targetState} mode with tallies: ${tallies.join(',')}`);
       }
     } catch (err) {
       console.error('[SERIAL SYNC ERROR]', err);
@@ -788,7 +782,8 @@ app.post('/api/hardware/sync', async (req, res) => {
     const targetState = isPublishedSync ? 'PUBLISHED' : 'VOTING';
     arduinoBridge.syncState(targetState, tallies);
     broadcast('HARDWARE_EVENT', {
-      action: isPublishedSync ? 'PUBLISH' : 'START',
+      action: 'SYNC',
+      state: targetState,
       election,
       message: `Synchronized ${targetState} mode with Arduino`
     });
