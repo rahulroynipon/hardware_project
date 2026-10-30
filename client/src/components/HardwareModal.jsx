@@ -565,20 +565,39 @@ export default function HardwareModal({
               {isStandby ? 'Start Voting (1 Click)' : isPublished ? 'Start New Live (1 Click)' : 'Restart Live (1 Click)'}
             </button>
 
-            <button
-              className="btn-outline"
-              style={{
-                cursor: 'pointer',
-                borderColor: isPublished ? '#10B981' : undefined,
-                color: isPublished ? '#065F46' : undefined,
-                background: isPublished && activeLcdView === 'WINNER' ? '#A7F3D0' : isPublished ? '#ECFDF5' : undefined,
-                fontWeight: isPublished ? 800 : 500,
-                boxShadow: isPublished && activeLcdView === 'WINNER' ? '0 0 0 2px #10B981' : undefined
-              }}
-              onClick={() => handleTriggerAction('PUBLISH')}
-            >
-              {isPublished ? '🏆 Show Winner (LCD)' : 'Publish Results (1 Click)'}
-            </button>
+            {/* Only show Publish Results button when voting has actively started */}
+            {isVoting && (
+              <button
+                className="btn-outline"
+                style={{
+                  cursor: 'pointer',
+                  borderColor: '#DC2626',
+                  color: '#991B1B',
+                  fontWeight: 700
+                }}
+                onClick={() => handleTriggerAction('PUBLISH')}
+              >
+                Publish Results (1 Click)
+              </button>
+            )}
+
+            {/* When results are published, show the winner view button */}
+            {isPublished && (
+              <button
+                className="btn-outline"
+                style={{
+                  cursor: 'pointer',
+                  borderColor: '#10B981',
+                  color: '#065F46',
+                  background: activeLcdView === 'WINNER' ? '#A7F3D0' : '#ECFDF5',
+                  fontWeight: 800,
+                  boxShadow: activeLcdView === 'WINNER' ? '0 0 0 2px #10B981' : undefined
+                }}
+                onClick={() => handleTriggerAction('PUBLISH')}
+              >
+                🏆 Show Winner (LCD)
+              </button>
+            )}
 
             {isPublished && (
               <>

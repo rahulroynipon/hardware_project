@@ -11,8 +11,8 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 // ==========================================
 const byte candidatePins[4] = {3, 4, 5, 6};
 const byte resultButton = 7;
-const byte greenLED = 12;
-const byte redLED = 13;
+const byte greenLED = 13;
+const byte redLED = 12;
 
 const char candidateNames[4] = {'A', 'B', 'C', 'D'};
 byte activeCandidateCount =
