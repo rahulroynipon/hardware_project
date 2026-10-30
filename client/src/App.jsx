@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Header from './components/Header';
 import Dashboard from './components/Dashboard';
 import ElectionsList from './components/ElectionsList';
@@ -12,6 +12,7 @@ import {
   publishElection,
   deleteElection,
   fetchHardwareStatus,
+  fetchHardwareTestMode,
   connectWebSocket
 } from './services/api';
 
@@ -22,9 +23,12 @@ export default function App() {
   const [counts, setCounts] = useState({ total: 0, draft: 0, live: 0, published: 0 });
   const [loading, setLoading] = useState(true);
   const [isHardwareConnected, setIsHardwareConnected] = useState(false);
+  const [isTestMode, setIsTestMode] = useState(false);
+  const [hardwareNotice, setHardwareNotice] = useState(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isHardwareModalOpen, setIsHardwareModalOpen] = useState(false);
   const [lastHardwareEvent, setLastHardwareEvent] = useState(null);
+  const prevConnectedRef = useRef(null);
 
   // Load elections from Express & PostgreSQL
   const loadElections = useCallback(async () => {
@@ -41,26 +45,83 @@ export default function App() {
     }
   }, []);
 
-  // Check hardware connection
+  // Update hardware status and trigger side alert notification on state transitions
+  const updateHardwareStatus = useCallback((connected, portPath = '') => {
+    setIsHardwareConnected((prev) => {
+      // First initialization
+      if (prevConnectedRef.current === null) {
+        prevConnectedRef.current = connected;
+        if (!connected) {
+          setHardwareNotice({
+            type: 'disconnected',
+            title: 'Please Connect Hardware',
+            message: 'Arduino Uno voting machine is not detected on USB. Physical push-button voting is unavailable.'
+          });
+        }
+        return connected;
+      }
+
+      // Transition: Disconnected -> Reconnected
+      if (!prev && connected) {
+        prevConnectedRef.current = true;
+        setHardwareNotice({
+          type: 'connected',
+          title: 'Hardware Connected',
+          message: `Arduino Uno successfully detected${portPath ? ` on ${portPath}` : ''}. Physical voting & live sync are ready.`
+        });
+        setTimeout(() => {
+          setHardwareNotice((curr) => (curr?.type === 'connected' ? null : curr));
+        }, 5000);
+      }
+      // Transition: Connected -> Disconnected
+      else if (prev && !connected) {
+        prevConnectedRef.current = false;
+        setHardwareNotice({
+          type: 'disconnected',
+          title: 'Hardware Disconnected',
+          message: 'Arduino Uno voting machine has been unplugged. Please connect the hardware via USB to enable physical voting.'
+        });
+      }
+
+      return connected;
+    });
+  }, []);
+
+  // Check hardware connection via REST
   const checkHardware = useCallback(async () => {
     try {
       const data = await fetchHardwareStatus();
-      setIsHardwareConnected(data.connected);
+      updateHardwareStatus(data.connected, data.port);
     } catch (e) {
-      setIsHardwareConnected(false);
+      updateHardwareStatus(false);
     }
-  }, []);
+  }, [updateHardwareStatus]);
 
   useEffect(() => {
     loadElections();
     checkHardware();
+    fetchHardwareTestMode().then((d) => setIsTestMode(Boolean(d.testMode))).catch(() => {});
+
+    // Polling interval for fast physical hot-plug detection
+    const pollInterval = setInterval(checkHardware, 2500);
 
     // Setup live WebSocket telemetry
     const cleanupWs = connectWebSocket(
       (msg) => {
-        console.log('[WS INCOMING]', msg);
-        if (msg.type === 'VOTE_CAST') {
-          // Live vote update: increment candidate votes in state
+        if (msg.type === 'HARDWARE_STATUS') {
+          updateHardwareStatus(msg.payload.connected, msg.payload.port);
+        } else if (msg.type === 'TEST_MODE_CHANGED') {
+          setIsTestMode(Boolean(msg.payload.testMode));
+        } else if (msg.type === 'TEST_VOTE_CAST') {
+          // Test vote: do NOT increment official DB tallies or modify election votes
+          setLastHardwareEvent({
+            action: 'TEST_VOTE',
+            slot: msg.payload.slot,
+            fromHardware: msg.payload.fromHardware,
+            _t: Date.now()
+          });
+        } else if (msg.type === 'VOTE_CAST') {
+          // Live vote update: increment candidate votes in official state
           const { electionId, candidateId, candidateVotes, slot } = msg.payload;
           setLastHardwareEvent({ action: 'VOTE_CAST', slot, _t: Date.now() });
           setElections((prev) =>
@@ -87,13 +148,16 @@ export default function App() {
           loadElections();
         }
       },
-      (isConnected) => {
-        setIsHardwareConnected(isConnected);
+      () => {
+        // WebSocket connection status - does not override physical serial status
       }
     );
 
-    return () => cleanupWs();
-  }, [loadElections, checkHardware]);
+    return () => {
+      clearInterval(pollInterval);
+      cleanupWs();
+    };
+  }, [loadElections, checkHardware, updateHardwareStatus]);
 
   // Selected election object for details view
   const selectedElection = elections.find((e) => e.id === selectedElectionId);
@@ -198,10 +262,134 @@ export default function App() {
         isOpen={isHardwareModalOpen}
         onClose={() => setIsHardwareModalOpen(false)}
         isHardwareConnected={isHardwareConnected}
+        isTestMode={isTestMode}
+        setIsTestMode={setIsTestMode}
         liveElection={liveElection}
         publishedElection={selectedElection?.status === 'published' ? selectedElection : elections.find((e) => e.status === 'published')}
         lastHardwareEvent={lastHardwareEvent}
       />
+
+      {/* Floating Hardware Disconnect / Reconnect Side Modal Alert */}
+      {hardwareNotice && (
+        <aside
+          role="alert"
+          aria-live="assertive"
+          className="hardware-side-modal"
+          style={{
+            position: 'fixed',
+            bottom: '24px',
+            right: '24px',
+            zIndex: 9999,
+            width: '360px',
+            maxWidth: 'calc(100vw - 32px)',
+            background: hardwareNotice.type === 'disconnected' ? '#FEF2F2' : '#F0FDF4',
+            border: `2px solid ${hardwareNotice.type === 'disconnected' ? '#F87171' : '#4ADE80'}`,
+            borderRadius: '12px',
+            padding: '16px',
+            boxShadow: '0 12px 28px -4px rgba(0, 0, 0, 0.25), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '10px',
+            transition: 'all 0.25s ease'
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span style={{ fontSize: '24px', lineHeight: 1 }}>
+                {hardwareNotice.type === 'disconnected' ? '⚠️' : '🟢'}
+              </span>
+              <div>
+                <h4
+                  style={{
+                    margin: 0,
+                    fontSize: '14px',
+                    fontWeight: 800,
+                    color: hardwareNotice.type === 'disconnected' ? '#991B1B' : '#065F46'
+                  }}
+                >
+                  {hardwareNotice.title}
+                </h4>
+                <span
+                  style={{
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    color: hardwareNotice.type === 'disconnected' ? '#DC2626' : '#16A34A',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.04em'
+                  }}
+                >
+                  {hardwareNotice.type === 'disconnected' ? 'Action Required' : 'Ready for Voting'}
+                </span>
+              </div>
+            </div>
+            <button
+              onClick={() => setHardwareNotice(null)}
+              style={{
+                background: 'none',
+                border: 'none',
+                fontSize: '20px',
+                color: hardwareNotice.type === 'disconnected' ? '#991B1B' : '#065F46',
+                cursor: 'pointer',
+                padding: '0 4px',
+                fontWeight: 700,
+                lineHeight: 1
+              }}
+              title="Dismiss notice"
+            >
+              &times;
+            </button>
+          </div>
+
+          <p
+            style={{
+              margin: 0,
+              fontSize: '12px',
+              color: hardwareNotice.type === 'disconnected' ? '#7F1D1D' : '#14532D',
+              lineHeight: 1.45
+            }}
+          >
+            {hardwareNotice.message}
+          </p>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '4px' }}>
+            <button
+              className="btn-outline"
+              style={{
+                padding: '6px 12px',
+                fontSize: '11px',
+                fontWeight: 700,
+                borderRadius: '6px',
+                background: '#FFFFFF',
+                borderColor: hardwareNotice.type === 'disconnected' ? '#FCA5A5' : '#86EFAC',
+                color: hardwareNotice.type === 'disconnected' ? '#991B1B' : '#065F46',
+                cursor: 'pointer'
+              }}
+              onClick={() => {
+                setIsHardwareModalOpen(true);
+                setHardwareNotice(null);
+              }}
+            >
+              Open Console
+            </button>
+            <button
+              className="btn-outline"
+              style={{
+                padding: '6px 10px',
+                fontSize: '11px',
+                fontWeight: 600,
+                borderRadius: '6px',
+                background: 'transparent',
+                border: '1px solid transparent',
+                color: '#64748B',
+                cursor: 'pointer'
+              }}
+              onClick={() => setHardwareNotice(null)}
+            >
+              Dismiss
+            </button>
+          </div>
+        </aside>
+      )}
     </div>
   );
 }

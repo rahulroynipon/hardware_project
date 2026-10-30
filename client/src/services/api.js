@@ -67,6 +67,17 @@ export async function castVote(slot) {
   return data;
 }
 
+export async function sendTestVote(slot) {
+  const res = await fetch(`${API_BASE}/hardware/test-vote`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slot })
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to simulate test vote');
+  return data;
+}
+
 export async function fetchHardwareStatus() {
   const res = await fetch(`${API_BASE}/hardware/status`);
   if (!res.ok) throw new Error('Failed to check hardware status');
@@ -92,13 +103,31 @@ export async function flashHardwareFirmware() {
   return data;
 }
 
-export async function syncLiveElectionToHardware() {
+export async function syncLiveElectionToHardware(payload = {}) {
   const res = await fetch(`${API_BASE}/hardware/sync`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' }
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
   });
   const data = await res.json();
   if (!res.ok || !data.success) throw new Error(data.error || 'Failed to sync live votes');
+  return data;
+}
+
+export async function fetchHardwareTestMode() {
+  const res = await fetch(`${API_BASE}/hardware/test-mode`);
+  if (!res.ok) throw new Error('Failed to fetch test mode');
+  return res.json();
+}
+
+export async function setHardwareTestMode(testMode, extra = {}) {
+  const res = await fetch(`${API_BASE}/hardware/test-mode`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ testMode, ...extra })
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to update test mode');
   return data;
 }
 

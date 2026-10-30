@@ -15,19 +15,27 @@ class ArduinoSerialBridge {
     this.onResetCallback = null;
     this.onStatusCallback = null;
     this.onConnectCallback = null;
+    this.onDisconnectCallback = null;
     this.onInspectCallback = null;
     this.onVoteBlockedCallback = null;
+    this.onModeSwitchCallback = null;
+    this.onSyncRequestCallback = null;
+    this.onTestVoteCallback = null;
   }
 
-  setCallbacks({ onVote, onStart, onPublish, onReset, onStatus, onConnect, onInspect, onVoteBlocked }) {
+  setCallbacks({ onVote, onStart, onPublish, onReset, onStatus, onConnect, onDisconnect, onInspect, onVoteBlocked, onModeSwitch, onSyncRequest, onTestVote }) {
     this.onVoteCallback = onVote;
     this.onStartCallback = onStart;
     this.onPublishCallback = onPublish;
     this.onResetCallback = onReset;
     this.onStatusCallback = onStatus;
     this.onConnectCallback = onConnect;
+    this.onDisconnectCallback = onDisconnect;
     this.onInspectCallback = onInspect;
     this.onVoteBlockedCallback = onVoteBlocked;
+    this.onModeSwitchCallback = onModeSwitch;
+    this.onSyncRequestCallback = onSyncRequest;
+    this.onTestVoteCallback = onTestVote;
   }
 
   async connect() {
@@ -58,7 +66,12 @@ class ArduinoSerialBridge {
 
       this.port.open((err) => {
         if (err) {
-          console.log(`[SERIAL] Port ${targetPath} not currently open: ${err.message}. Retrying in 5s...`);
+          const wasConnected = this.isConnected;
+          this.isConnected = false;
+          if (wasConnected && this.onDisconnectCallback) {
+            try { this.onDisconnectCallback(); } catch (e) {}
+          }
+          console.log(`[SERIAL] Port ${targetPath} not currently open: ${err.message}. Retrying in 2.5s...`);
           this.scheduleReconnect();
           return;
         }
@@ -82,9 +95,13 @@ class ArduinoSerialBridge {
         }
 
         this.port.on('close', () => {
+          const wasConnected = this.isConnected;
           this.isConnected = false;
+          if (wasConnected && this.onDisconnectCallback) {
+            try { this.onDisconnectCallback(); } catch (e) {}
+          }
           if (!this.isManualDisconnect) {
-            console.log('[SERIAL] Arduino disconnected. Reconnecting in 5s...');
+            console.log('[SERIAL] Arduino disconnected. Reconnecting in 2.5s...');
             this.scheduleReconnect();
           } else {
             console.log('[SERIAL] Port closed for firmware update.');
@@ -93,11 +110,20 @@ class ArduinoSerialBridge {
 
         this.port.on('error', (portErr) => {
           console.error('[SERIAL ERROR]', portErr.message);
+          const wasConnected = this.isConnected;
           this.isConnected = false;
+          if (wasConnected && this.onDisconnectCallback) {
+            try { this.onDisconnectCallback(); } catch (e) {}
+          }
         });
       });
     } catch (e) {
-      console.log(`[SERIAL] Connect error: ${e.message}. Retrying in 5s...`);
+      const wasConnected = this.isConnected;
+      this.isConnected = false;
+      if (wasConnected && this.onDisconnectCallback) {
+        try { this.onDisconnectCallback(); } catch (e) {}
+      }
+      console.log(`[SERIAL] Connect error: ${e.message}. Retrying in 2.5s...`);
       this.scheduleReconnect();
     }
   }
@@ -133,7 +159,7 @@ class ArduinoSerialBridge {
 
   scheduleReconnect() {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    this.reconnectTimer = setTimeout(() => this.connect(), 5000);
+    this.reconnectTimer = setTimeout(() => this.connect(), 2500);
   }
 
   handleSerialData(line) {
@@ -168,6 +194,12 @@ class ArduinoSerialBridge {
         if (this.onPublishCallback) this.onPublishCallback();
       } else if (event === 'RESET') {
         if (this.onResetCallback) this.onResetCallback();
+      } else if (event === 'MODE_SWITCH') {
+        if (this.onModeSwitchCallback) this.onModeSwitchCallback(cand, msg);
+      } else if (event === 'SYNC_REQUEST') {
+        if (this.onSyncRequestCallback) this.onSyncRequestCallback(cand, msg);
+      } else if (event === 'TEST_VOTE') {
+        if (this.onTestVoteCallback) this.onTestVoteCallback(cand);
       }
     }
   }

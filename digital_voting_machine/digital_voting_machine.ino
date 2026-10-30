@@ -49,6 +49,16 @@ bool lastReading[5] = {HIGH, HIGH, HIGH, HIGH, HIGH};
 bool stableState[5] = {HIGH, HIGH, HIGH, HIGH, HIGH};
 unsigned long lastDebounceTime[5] = {0, 0, 0, 0, 0};
 
+// Combo detection for last 2 physical buttons: Pin 6 (Candidate D) & Pin 7 (Control / Result)
+bool comboActive = false;
+bool comboHoldTriggered = false;
+unsigned long comboPressStart = 0;
+bool isHardwareTestModeActive = false;
+bool pin7Suppressed = false;
+bool dPending = false;
+unsigned long dPendingTime = 0;
+const unsigned long comboWindow = 90; // 90ms window to detect simultaneous press with Pin 7
+
 bool resultButtonHeld = false;
 bool resetTriggered = false;
 bool isPoweredOn = true;
@@ -187,9 +197,9 @@ void logStatistics() {
 void showWelcome() {
   lcd.clear();
   lcd.setCursor(1, 0);
-  lcd.print("DIGITAL VOTING");
+  lcd.print(F("DIGITAL VOTING"));
   lcd.setCursor(0, 1);
-  lcd.print("CITY UNIVERSITY ");
+  lcd.print(F("CITY UNIVERSITY "));
   delay(1200);
   lcd.clear();
 }
@@ -197,9 +207,9 @@ void showWelcome() {
 void showStandbyScreen() {
   lcd.clear();
   lcd.setCursor(0, 0);
-  lcd.print("TO START VOTING ");
+  lcd.print(F("TO START VOTING "));
   lcd.setCursor(0, 1);
-  lcd.print("PRESS TO START  ");
+  lcd.print(F("PRESS TO START  "));
   messageActive = false;
 }
 
@@ -243,10 +253,10 @@ void showMessage(const char *line1, const char *line2, unsigned long duration) {
 void showClosedScreen() {
   lcd.clear();
   lcd.setCursor(0, 0);
-  lcd.print("RESULT PUBLISHED");
+  lcd.print(F("RESULT PUBLISHED"));
 
   lcd.setCursor(0, 1);
-  lcd.print("Voting is closed");
+  lcd.print(F("Voting is closed"));
 
   messageActive = false;
 }
@@ -259,10 +269,10 @@ void showStatsPage() {
 
   if (statsPage == 0) {
     lcd.setCursor(0, 0);
-    lcd.print("TOTAL VOTES");
+    lcd.print(F("TOTAL VOTES"));
 
     lcd.setCursor(0, 1);
-    lcd.print("Total: ");
+    lcd.print(F("Total: "));
     lcd.print(total);
 
   } else if (statsPage >= 1 && statsPage <= activeCandidateCount) {
@@ -271,11 +281,11 @@ void showStatsPage() {
     float percentage = total > 0 ? (votes[i] * 100.0f) / total : 0.0f;
 
     lcd.setCursor(0, 0);
-    lcd.print("Candidate ");
+    lcd.print(F("Candidate "));
     lcd.print(candidateNames[i]);
 
     lcd.setCursor(0, 1);
-    lcd.print("Votes:");
+    lcd.print(F("Votes:"));
     lcd.print(votes[i]);
     lcd.print(' ');
 
@@ -305,33 +315,33 @@ void showStatsPage() {
 
     if (total == 0) {
       lcd.setCursor(0, 0);
-      lcd.print("NO VOTES CAST   ");
+      lcd.print(F("NO VOTES CAST   "));
       lcd.setCursor(0, 1);
-      lcd.print("Total: 0        ");
+      lcd.print(F("Total: 0        "));
 
     } else if (winnerCount > 1) {
       lcd.setCursor(0, 0);
-      lcd.print("TIE - NO WINNER ");
+      lcd.print(F("TIE - NO WINNER "));
       lcd.setCursor(0, 1);
-      lcd.print("Top votes: ");
+      lcd.print(F("Top votes: "));
       lcd.print(highest);
-      lcd.print("   ");
+      lcd.print(F("   "));
 
     } else {
       float winnerPct = (highest * 100.0f) / total;
       lcd.setCursor(0, 0);
-      lcd.print("WINNER: Cand ");
+      lcd.print(F("WINNER: Cand "));
       lcd.print(winner);
-      lcd.print("  ");
+      lcd.print(F("  "));
 
       lcd.setCursor(0, 1);
-      lcd.print("V:");
+      lcd.print(F("V:"));
       lcd.print(highest);
-      lcd.print(" (");
+      lcd.print(F(" ("));
       char pctStr[6];
       dtostrf(winnerPct, 3, 0, pctStr);
       lcd.print(pctStr);
-      lcd.print("%)   ");
+      lcd.print(F("%)   "));
     }
   }
 
@@ -414,6 +424,22 @@ void castVote(byte candidate, bool isRemote) {
     return;
   }
 
+  // Test Mode Guard: In test mode, visually simulate vote, blink LED, but do NOT increment persistent votes
+  if (isHardwareTestModeActive) {
+    digitalWrite(redLED, LOW);
+    digitalWrite(greenLED, LOW);
+    delay(120);
+    digitalWrite(greenLED, (machineState == STATE_VOTING) ? HIGH : LOW);
+
+    char candName = candidateNames[candidate];
+    logEvent("TEST_VOTE", candName, "TestVoteSimulated");
+
+    char row1[17];
+    snprintf(row1, sizeof(row1), "Candidate %c", candName);
+    showMessage("Test Vote Rec.", row1, 800);
+    return;
+  }
+
   votes[candidate]++;
 
   // Save each accepted vote
@@ -488,7 +514,7 @@ void powerOffMachine() {
 
   lcd.clear();
   lcd.setCursor(1, 0);
-  lcd.print("POWERING OFF...");
+  lcd.print(F("POWERING OFF..."));
   delay(800);
   lcd.clear();
   lcd.noBacklight(); // Completely shut down the display backlight
@@ -503,7 +529,7 @@ void powerOnMachine() {
   lcd.backlight(); // Turn on display backlight
   lcd.clear();
   lcd.setCursor(1, 0);
-  lcd.print("POWERING ON...");
+  lcd.print(F("POWERING ON..."));
   delay(1000);
   lcd.clear();
 
@@ -624,18 +650,15 @@ void processSerialCommand(const char *cmd) {
         machineState = STATE_STANDBY;
         digitalWrite(greenLED, LOW);
         digitalWrite(redLED, LOW);
-        showStandbyScreen();
       } else if (targetState == STATE_PUBLISHED) {
         machineState = STATE_PUBLISHED;
         digitalWrite(greenLED, LOW);
         digitalWrite(redLED, HIGH);
         statsPage = 5;
-        showStatsPage();
       } else {
         machineState = STATE_VOTING;
         digitalWrite(greenLED, HIGH);
         digitalWrite(redLED, LOW);
-        showReadyScreen();
       }
       lastButtonActionTime = millis();
       votingStartTime = millis();
@@ -645,6 +668,9 @@ void processSerialCommand(const char *cmd) {
                 : machineState == STATE_PUBLISHED ? 'P'
                                                   : 'V'),
                "StateSynced");
+
+      // Display synchronizing feedback on physical LCD for full 2.5s
+      showMessage("HARDWARE SYNCING", "PLEASE WAIT...  ", 2500);
     }
   } else if (strcasecmp(cmd, "START") == 0 ||
              strcasecmp(cmd, "START_VOTING") == 0) {
@@ -716,6 +742,17 @@ void processSerialCommand(const char *cmd) {
           showReadyScreen();
       }
     }
+  } else if (strcasecmp(cmd, "MODE:TEST") == 0 ||
+             strcasecmp(cmd, "TEST_MODE") == 0) {
+    isHardwareTestModeActive = true;
+    showMessage(" MODE SWITCHED  ", " TEST MODE ON   ", 2500);
+    logEvent("MODE_SWITCH", 'T', "TestModeFromWeb");
+  } else if (strcasecmp(cmd, "MODE:VOTING") == 0 ||
+             strcasecmp(cmd, "LIVE_MODE") == 0 ||
+             strcasecmp(cmd, "MODE:LIVE") == 0) {
+    isHardwareTestModeActive = false;
+    showMessage(" MODE SWITCHED  ", " LIVE VOTING ON ", 2500);
+    logEvent("MODE_SWITCH", 'V', "LiveModeFromWeb");
   } else if (strcasecmp(cmd, "IDENTIFY") == 0) {
     Serial.println("DEVICE:CITY_UNIVERSITY_VOTING_MACHINE_V1");
   } else {
@@ -763,7 +800,7 @@ void setup() {
   loadElection();
 
   // CSV header for serial logger and website backend
-  Serial.println("millis,event,candidate,A,B,C,D,total,closed,message");
+  Serial.println(F("millis,event,candidate,A,B,C,D,total,closed,message"));
 
   logEvent("START", '-', "MachineReady");
 
@@ -818,19 +855,83 @@ void loop() {
             // OFF
   }
 
-  // Candidate buttons (Pins 3, 4, 5, 6)
-  for (byte i = 0; i < 4; i++) {
+  // 1. Candidate buttons A (Pin 3), B (Pin 4), and C (Pin 5) - instant response
+  for (byte i = 0; i < 3; i++) {
     if (updateButton(i, candidatePins[i]) && stableState[i] == LOW) {
       castVote(i);
     }
   }
 
+  // 2. Physical Buttons: Pin 6 (Candidate D) & Pin 7 (Control / Result)
+  // Combo Logic:
+  // - Hold both Pin 6 & Pin 7 for 2-3s (>= 2000ms): Dual-Display Hardware Sync
+  // - Short press both Pin 6 & Pin 7 (< 2s): Toggle Mode (Test Mode <-> Live Voting Mode)
+  // - Press Pin 6 alone: Vote for Candidate D
+  // - Press Pin 7 alone: Control actions (Start / Publish / Cycle / Reset / Power)
+
+  bool dRaw = (digitalRead(candidatePins[3]) == LOW);
+  bool rRaw = (digitalRead(resultButton) == LOW);
+
+  if (dRaw && rRaw) {
+    // Both Pin 6 and Pin 7 are held down simultaneously!
+    dPending = false;
+    pin7Suppressed = true;
+
+    if (!comboActive) {
+      comboActive = true;
+      comboHoldTriggered = false;
+      comboPressStart = millis();
+    } else {
+      unsigned long heldDuration = millis() - comboPressStart;
+      if (heldDuration >= 2000 && !comboHoldTriggered) {
+        // HELD FOR 2-3 SECONDS: TRIGGER HARDWARE SYNC!
+        comboHoldTriggered = true;
+        showMessage("HARDWARE SYNCING", "PLEASE WAIT...  ", 2500);
+        logEvent("SYNC_REQUEST", isHardwareTestModeActive ? 'T' : 'V', "ComboHoldPin6And7");
+      }
+    }
+  } else {
+    // At least one button was released
+    if (comboActive) {
+      unsigned long heldDuration = millis() - comboPressStart;
+      comboActive = false;
+      if (!comboHoldTriggered && heldDuration >= 60 && heldDuration < 2000) {
+        // SHORT PRESS OF BOTH BUTTONS (< 2s): TOGGLE TEST / VOTING MODE!
+        isHardwareTestModeActive = !isHardwareTestModeActive;
+        if (isHardwareTestModeActive) {
+          showMessage(" MODE SWITCHED  ", " TEST MODE ON   ", 2500);
+          logEvent("MODE_SWITCH", 'T', "ComboPin6And7");
+        } else {
+          showMessage(" MODE SWITCHED  ", " LIVE VOTING ON ", 2500);
+          logEvent("MODE_SWITCH", 'V', "ComboPin6And7");
+        }
+      }
+      comboHoldTriggered = false;
+    } else {
+      // Normal individual button press for Candidate D (Pin 6)
+      if (updateButton(3, candidatePins[3])) {
+        if (stableState[3] == LOW) {
+          dPending = true;
+          dPendingTime = millis();
+        } else {
+          dPending = false;
+        }
+      }
+
+      // If Pin 6 was pressed and comboWindow elapsed without Pin 7 pressed, cast vote D!
+      if (dPending && (millis() - dPendingTime >= comboWindow)) {
+        dPending = false;
+        if (!rRaw) {
+          castVote(3);
+        }
+      }
+    }
+  }
+
   // Result button (Pin 7) actions:
-  // - Short Click (< 3s): Start (in Standby), Publish (in Voting), Stats Cycle
-  // (in Published)
+  // - Short Click (< 3s): Start (in Standby), Publish (in Voting), Stats Cycle (in Published)
   // - 3s Hold & Release (between 3s and 5s): Reset tallies & return to Standby
-  // - 5s Continuous Hold: Power OFF (clears display, turns off LCD backlight &
-  // LEDs)
+  // - 5s Continuous Hold: Power OFF (clears display, turns off LCD backlight & LEDs)
   if (updateButton(4, resultButton)) {
     if (stableState[4] == LOW) {
       // Button was pressed down
@@ -838,9 +939,14 @@ void loop() {
       resetTriggered = false;
       powerActionTriggered = false;
       resultPressStart = millis();
+      pin7Suppressed = false;
     } else {
       // Button was released
-      if (resultButtonHeld && !powerActionTriggered) {
+      if (pin7Suppressed) {
+        // Suppressed because it was part of a combo with Pin 6!
+        pin7Suppressed = false;
+        resultButtonHeld = false;
+      } else if (resultButtonHeld && !powerActionTriggered) {
         unsigned long heldDuration = millis() - resultPressStart;
 
         if (heldDuration >= resetHoldTime && heldDuration < powerHoldTime) {
@@ -855,9 +961,7 @@ void loop() {
               startVoting();
             } else if (machineState == STATE_VOTING) {
               // Action 2: 2nd Click publishes results!
-              // Guard: ensure voting has been active for at least
-              // publishLockout (2.5s) AND ensure the transition screen message
-              // "VOTING STARTED" is finished
+              // Guard: ensure voting has been active for at least publishLockout (2.5s)
               if (!messageActive &&
                   (millis() - votingStartTime >= publishLockout)) {
                 publishResults();
@@ -883,8 +987,8 @@ void loop() {
     }
   }
 
-  // Trigger Power OFF when held continuously for 5 seconds
-  if (resultButtonHeld && !powerActionTriggered &&
+  // Trigger Power OFF when held continuously for 5 seconds (only when not part of combo)
+  if (resultButtonHeld && !pin7Suppressed && !powerActionTriggered &&
       millis() - resultPressStart >= powerHoldTime) {
     powerActionTriggered = true;
     resultButtonHeld = false;

@@ -239,10 +239,105 @@ async function closeAndPublishLiveElection(electionId = null, { fromHardware = f
   return election;
 }
 
+// ---------- Global Hardware Test Mode State ----------
+let isHardwareTestMode = false;
+let currentTestTallies = [0, 0, 0, 0];
+let currentTestState = 'VOTING';
+
 // ---------- Wire Up Arduino Hardware Events ----------
 arduinoBridge.setCallbacks({
+  onConnect: async () => {
+    console.log('[HARDWARE] Arduino connected on port:', arduinoBridge.portPath);
+    broadcast('HARDWARE_STATUS', { connected: true, port: arduinoBridge.portPath });
+    try {
+      if (!isHardwareTestMode) {
+        await syncLiveToHardwareHelper();
+      }
+    } catch (e) {
+      console.error('[ONCONNECT SYNC ERROR]', e);
+    }
+  },
+  onDisconnect: () => {
+    console.log('[HARDWARE] Arduino disconnected from USB.');
+    broadcast('HARDWARE_STATUS', { connected: false, port: arduinoBridge.portPath });
+  },
   onVote: (slot) => {
+    if (isHardwareTestMode) {
+      const idx = slot.toUpperCase().charCodeAt(0) - 65;
+      if (idx >= 0 && idx < 4) {
+        currentTestTallies[idx] = (currentTestTallies[idx] || 0) + 1;
+      }
+      console.log(`[TEST MODE VOTE] Physical hardware button pressed for Slot ${slot}. NOT recorded in database.`);
+      broadcast('TEST_VOTE_CAST', {
+        slot: slot.toUpperCase(),
+        fromHardware: true,
+        message: `Test vote for Slot ${slot} recorded on hardware only (Not in DB)`
+      });
+      return;
+    }
     castVoteBySlot(slot, { fromHardware: true }).catch(console.error);
+  },
+  onTestVote: (slot) => {
+    const idx = slot.toUpperCase().charCodeAt(0) - 65;
+    if (idx >= 0 && idx < 4) {
+      currentTestTallies[idx] = (currentTestTallies[idx] || 0) + 1;
+    }
+    console.log(`[TEST MODE VOTE ACK] Hardware simulated vote for Candidate ${slot}`);
+    broadcast('TEST_VOTE_CAST', {
+      slot: slot.toUpperCase(),
+      fromHardware: true,
+      message: `Test vote for Slot ${slot} simulated on hardware`
+    });
+  },
+  onModeSwitch: (modeCode, msg) => {
+    const nextTestMode = (modeCode === 'T');
+    isHardwareTestMode = nextTestMode;
+    console.log(`[HARDWARE EVENT] Physical buttons switched mode to: ${isHardwareTestMode ? 'TEST MODE' : 'LIVE MODE'}`);
+    broadcast('TEST_MODE_CHANGED', { testMode: isHardwareTestMode });
+    broadcast('HARDWARE_EVENT', {
+      action: 'MODE_SWITCH',
+      testMode: isHardwareTestMode,
+      message: isHardwareTestMode ? 'Hardware Test Mode activated' : 'Live Voting Mode activated'
+    });
+
+    // AUTO-SYNC ON MODE SWITCH:
+    // Delay 2600ms so the LCD first clearly shows "MODE SWITCHED" for 2.5s, then immediately auto-syncs compatible data!
+    setTimeout(async () => {
+      try {
+        if (isHardwareTestMode) {
+          console.log(`[AUTO-SYNC] Automatically synchronizing test data: ${currentTestTallies.join(',')}`);
+          arduinoBridge.setCandidateCount(4);
+          arduinoBridge.syncState(currentTestState, currentTestTallies);
+          broadcast('HARDWARE_EVENT', {
+            action: 'SYNC',
+            isTestMode: true,
+            state: currentTestState,
+            tallies: currentTestTallies,
+            message: 'Auto-synchronized hardware with compatible test data'
+          });
+        } else {
+          console.log('[AUTO-SYNC] Automatically synchronizing live election database to hardware...');
+          await syncLiveToHardwareHelper();
+        }
+      } catch (err) {
+        console.error('[AUTO-SYNC ERROR]', err);
+      }
+    }, 2600);
+  },
+  onSyncRequest: async (modeCode, msg) => {
+    console.log(`[HARDWARE COMBO HOLD] 2-3s Hold on Pin 6 & 7! Triggering sync (Mode: ${isHardwareTestMode ? 'TEST' : 'LIVE'})`);
+    broadcast('HARDWARE_EVENT', {
+      action: 'SYNC_START',
+      isTestMode: isHardwareTestMode,
+      message: 'Hardware synchronizing (3s physical button hold)...'
+    });
+    if (isHardwareTestMode) {
+      // In test mode: request frontend to push current modal display tallies
+      broadcast('SYNC_TEST_REQUESTED', {});
+    } else {
+      // In live mode: sync from DB
+      await syncLiveToHardwareHelper();
+    }
   },
   onStart: () => {
     console.log('[HARDWARE EVENT] Pin 7 Start Voting pressed on Arduino.');
@@ -292,47 +387,6 @@ arduinoBridge.setCallbacks({
       reason,
       message: isNotStarted ? 'NOT STARTED - Press to Start' : 'RESULT PUBLISHED - Voting is closed'
     });
-  },
-  onConnect: async () => {
-    try {
-      let targetElection = await getLiveElection();
-      let isPublishedSync = false;
-
-      if (!targetElection) {
-        const { rows } = await pool.query(
-          "SELECT * FROM elections WHERE status = 'published' ORDER BY updated_at DESC, created_at DESC LIMIT 1;"
-        );
-        if (rows.length > 0) {
-          const pub = rows[0];
-          const candRes = await pool.query(
-            "SELECT * FROM candidates WHERE election_id = $1 ORDER BY ballot_order ASC;",
-            [pub.id]
-          );
-          pub.candidates = candRes.rows;
-          targetElection = pub;
-          isPublishedSync = true;
-        }
-      }
-
-      if (targetElection && targetElection.candidates && targetElection.candidates.length > 0) {
-        console.log(`[SERIAL SYNC] Auto-syncing Arduino (${isPublishedSync ? 'PUBLISHED' : 'LIVE'}) "${targetElection.title}"...`);
-        arduinoBridge.setCandidateCount(targetElection.candidates.length);
-
-        const tallies = [0, 0, 0, 0];
-        targetElection.candidates.forEach((c) => {
-          const idx = (c.slot || '').toUpperCase().charCodeAt(0) - 65;
-          if (idx >= 0 && idx < 4) {
-            tallies[idx] = c.votes || 0;
-          }
-        });
-
-        const targetState = isPublishedSync ? 'PUBLISHED' : 'VOTING';
-        arduinoBridge.syncState(targetState, tallies);
-        console.log(`[SERIAL SYNC] Adjusted hardware to ${targetState} mode with tallies: ${tallies.join(',')}`);
-      }
-    } catch (err) {
-      console.error('[SERIAL SYNC ERROR]', err);
-    }
   }
 });
 
@@ -643,25 +697,115 @@ app.delete('/api/elections/:id', async (req, res) => {
   }
 });
 
-// 6. Cast Vote manually / from UI
+// 6. Cast Vote route (Enforces Hardware-Only in Live Mode, Simulation in Test Mode)
 app.post('/api/voting/vote', async (req, res) => {
   const { slot } = req.body;
   if (!slot || !['A', 'B', 'C', 'D'].includes(slot.toUpperCase())) {
     return res.status(400).json({ success: false, error: 'Invalid candidate slot. Must be A, B, C, or D.' });
   }
 
-  try {
-    const result = await castVoteBySlot(slot.toUpperCase(), { fromHardware: false });
-    if (!result) {
-      return res.status(400).json({ success: false, error: `Candidate slot ${slot} is disabled in the active election.` });
+  const cleanSlot = slot.toUpperCase();
+
+  // If in Test Mode: Simulate and DO NOT record to PostgreSQL database
+  if (isHardwareTestMode) {
+    console.log(`[TEST MODE VOTE FROM WEB] Simulated vote for Slot ${cleanSlot} (Not recorded in database).`);
+    if (arduinoBridge.isConnected) {
+      arduinoBridge.simulateVote(cleanSlot);
     }
-    if (result.isPublished) {
-      return res.status(400).json({ success: false, isPublished: true, winner: result.winner, error: result.error });
-    }
-    res.json({ success: true, result });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    broadcast('TEST_VOTE_CAST', {
+      slot: cleanSlot,
+      fromHardware: false,
+      message: `Test vote for Slot ${cleanSlot} simulated on web (Database untouched)`
+    });
+    return res.json({
+      success: true,
+      slot: cleanSlot,
+      isTestMode: true,
+      message: `Simulated test vote for Candidate ${cleanSlot} (Database untouched)`
+    });
   }
+
+  // In Live Voting Mode: Web voting is disabled! Real votes must come from physical Arduino push buttons
+  return res.status(403).json({
+    success: false,
+    error: 'Web voting is disabled in Live Voting Mode. Votes must be cast using physical Arduino hardware buttons (Pins D3–D6).'
+  });
+});
+
+// 6.5 Test Vote: Simulates hardware vote for diagnostics without recording to database
+app.post('/api/hardware/test-vote', (req, res) => {
+  const { slot } = req.body;
+  if (!slot || !['A', 'B', 'C', 'D'].includes(slot.toUpperCase())) {
+    return res.status(400).json({ success: false, error: 'Invalid candidate slot. Must be A, B, C, or D.' });
+  }
+
+  const cleanSlot = slot.toUpperCase();
+  console.log(`[TEST MODE VOTE] Simulated vote for Slot ${cleanSlot} (Not recorded in database).`);
+
+  if (arduinoBridge.isConnected) {
+    arduinoBridge.simulateVote(cleanSlot);
+  }
+
+  broadcast('TEST_VOTE_CAST', {
+    slot: cleanSlot,
+    fromHardware: false,
+    message: `Test vote for Slot ${cleanSlot} simulated on web (Database untouched)`
+  });
+
+  res.json({
+    success: true,
+    slot: cleanSlot,
+    isTestMode: true,
+    message: `Simulated test vote for Candidate ${cleanSlot} (Database untouched)`
+  });
+});
+
+// 6.6 Hardware Test Mode toggle endpoints
+app.get('/api/hardware/test-mode', (req, res) => {
+  res.json({ success: true, testMode: isHardwareTestMode });
+});
+
+app.post('/api/hardware/test-mode', (req, res) => {
+  const { testMode, tallies, state = 'VOTING', candidateCount = 4 } = req.body;
+  isHardwareTestMode = Boolean(testMode);
+  console.log(`[TEST MODE] Hardware Test Mode switched to: ${isHardwareTestMode}`);
+  if (arduinoBridge.isConnected) {
+    arduinoBridge.send(isHardwareTestMode ? 'MODE:TEST' : 'MODE:VOTING');
+  }
+  broadcast('TEST_MODE_CHANGED', { testMode: isHardwareTestMode });
+  broadcast('HARDWARE_EVENT', {
+    action: 'MODE_SWITCH',
+    testMode: isHardwareTestMode,
+    message: isHardwareTestMode ? 'Hardware Test Mode activated' : 'Live Voting Mode activated'
+  });
+
+  if (Array.isArray(tallies) && tallies.length === 4) {
+    currentTestTallies = [...tallies];
+    currentTestState = state;
+  }
+
+  // Auto-sync hardware after displaying "MODE SWITCHED" for 2600ms
+  setTimeout(async () => {
+    try {
+      if (isHardwareTestMode) {
+        arduinoBridge.setCandidateCount(candidateCount);
+        arduinoBridge.syncState(state, currentTestTallies);
+        broadcast('HARDWARE_EVENT', {
+          action: 'SYNC',
+          isTestMode: true,
+          state,
+          tallies: currentTestTallies,
+          message: 'Auto-synchronized hardware with test data'
+        });
+      } else {
+        await syncLiveToHardwareHelper();
+      }
+    } catch (err) {
+      console.error('[AUTO-SYNC ERROR]', err);
+    }
+  }, 2600);
+
+  res.json({ success: true, testMode: isHardwareTestMode });
 });
 
 // 7. Hardware actions trigger
@@ -742,66 +886,94 @@ app.get('/api/hardware/status', async (req, res) => {
   });
 });
 
-// 8.5 Sync live election candidates & votes to Arduino LCD
+// Helper for syncing live election to hardware
+async function syncLiveToHardwareHelper() {
+  let election = await getLiveElection();
+  let isPublishedSync = false;
+
+  if (!election) {
+    const { rows } = await pool.query(
+      "SELECT * FROM elections WHERE status = 'published' ORDER BY updated_at DESC, created_at DESC LIMIT 1;"
+    );
+    if (rows.length > 0) {
+      const pub = rows[0];
+      const candRes = await pool.query(
+        "SELECT * FROM candidates WHERE election_id = $1 ORDER BY ballot_order ASC;",
+        [pub.id]
+      );
+      pub.candidates = candRes.rows;
+      election = pub;
+      isPublishedSync = true;
+    }
+  }
+
+  if (!election || !election.candidates || election.candidates.length === 0) {
+    arduinoBridge.syncState('STANDBY', [0, 0, 0, 0]);
+    broadcast('HARDWARE_EVENT', { action: 'SYNC', state: 'STANDBY', message: 'Machine synced to Standby mode' });
+    return { success: true, message: 'Synchronized Arduino to Standby mode', state: 'STANDBY' };
+  }
+
+  const tallies = [0, 0, 0, 0];
+  election.candidates.forEach((c) => {
+    const idx = (c.slot || '').toUpperCase().charCodeAt(0) - 65;
+    if (idx >= 0 && idx < 4) {
+      tallies[idx] = c.votes || 0;
+    }
+  });
+
+  arduinoBridge.setCandidateCount(election.candidates.length);
+  const targetState = isPublishedSync ? 'PUBLISHED' : 'VOTING';
+  arduinoBridge.syncState(targetState, tallies);
+  broadcast('HARDWARE_EVENT', {
+    action: 'SYNC',
+    state: targetState,
+    election,
+    message: `Synchronized ${targetState} mode with Arduino`
+  });
+
+  console.log(`[HARDWARE SYNC] Synced (${isPublishedSync ? 'PUBLISHED' : 'LIVE'}) "${election.title}" (${election.candidates.length} candidates, tallies: ${tallies.join(',')}) to Arduino.`);
+  return {
+    success: true,
+    message: `Synchronized "${election.title}" with Arduino display`,
+    election: election.title,
+    isPublished: isPublishedSync,
+    candidateCount: election.candidates.length,
+    tallies: {
+      A: tallies[0],
+      B: tallies[1],
+      C: tallies[2],
+      D: tallies[3]
+    }
+  };
+}
+
+// 8.5 Sync endpoint: handles both Live Mode (from DB) and Test Mode (from modal display data)
 app.post('/api/hardware/sync', async (req, res) => {
   try {
-    let election = await getLiveElection();
-    let isPublishedSync = false;
+    const { isTestMode = false, state = 'VOTING', tallies = [0, 0, 0, 0], candidateCount = 4 } = req.body;
 
-    if (!election) {
-      const { rows } = await pool.query(
-        "SELECT * FROM elections WHERE status = 'published' ORDER BY updated_at DESC, created_at DESC LIMIT 1;"
-      );
-      if (rows.length > 0) {
-        const pub = rows[0];
-        const candRes = await pool.query(
-          "SELECT * FROM candidates WHERE election_id = $1 ORDER BY ballot_order ASC;",
-          [pub.id]
-        );
-        pub.candidates = candRes.rows;
-        election = pub;
-        isPublishedSync = true;
+    // In Test Mode: sync directly with Hardware Modal display data!
+    if (isTestMode || isHardwareTestMode) {
+      console.log(`[SYNC IN TEST MODE] Syncing hardware with modal display data: state=${state}, tallies=${tallies.join(',')}`);
+      if (Array.isArray(tallies) && tallies.length === 4) {
+        currentTestTallies = [...tallies];
+        currentTestState = state;
       }
+      arduinoBridge.setCandidateCount(candidateCount);
+      arduinoBridge.syncState(state, tallies);
+      broadcast('HARDWARE_EVENT', {
+        action: 'SYNC',
+        isTestMode: true,
+        state,
+        tallies,
+        message: 'Physical hardware synchronized with Test Mode modal display'
+      });
+      return res.json({ success: true, isTestMode: true, state, tallies });
     }
 
-    if (!election || !election.candidates || election.candidates.length === 0) {
-      arduinoBridge.syncState('STANDBY', [0, 0, 0, 0]);
-      broadcast('HARDWARE_EVENT', { action: 'RESET', message: 'Machine synced to Standby mode' });
-      return res.json({ success: true, message: 'Synchronized Arduino to Standby mode', state: 'STANDBY' });
-    }
-
-    const tallies = [0, 0, 0, 0];
-    election.candidates.forEach((c) => {
-      const idx = (c.slot || '').toUpperCase().charCodeAt(0) - 65;
-      if (idx >= 0 && idx < 4) {
-        tallies[idx] = c.votes || 0;
-      }
-    });
-
-    arduinoBridge.setCandidateCount(election.candidates.length);
-    const targetState = isPublishedSync ? 'PUBLISHED' : 'VOTING';
-    arduinoBridge.syncState(targetState, tallies);
-    broadcast('HARDWARE_EVENT', {
-      action: 'SYNC',
-      state: targetState,
-      election,
-      message: `Synchronized ${targetState} mode with Arduino`
-    });
-
-    console.log(`[HARDWARE SYNC] Synced (${isPublishedSync ? 'PUBLISHED' : 'LIVE'}) "${election.title}" (${election.candidates.length} candidates, tallies: ${tallies.join(',')}) to Arduino.`);
-    res.json({
-      success: true,
-      message: `Synchronized "${election.title}" with Arduino display`,
-      election: election.title,
-      isPublished: isPublishedSync,
-      candidateCount: election.candidates.length,
-      tallies: {
-        A: tallies[0],
-        B: tallies[1],
-        C: tallies[2],
-        D: tallies[3]
-      }
-    });
+    // In Live Mode: sync with PostgreSQL DB
+    const result = await syncLiveToHardwareHelper();
+    res.json({ success: true, ...result });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

@@ -39,7 +39,7 @@ export default function Header({ currentView, setCurrentView, isHardwareConnecte
           title="Click to manage Arduino hardware voting machine"
         >
           <span className="pulse-dot"></span>
-          <span>{isHardwareConnected ? 'Arduino Live' : 'Hardware Ready'}</span>
+          <span>{isHardwareConnected ? 'Arduino Live' : 'Please Connect Hardware'}</span>
         </button>
       </div>
     </header>
