@@ -28,6 +28,8 @@ ChartJS.register(
 export default function Dashboard({
   elections = [],
   counts = { total: 0, draft: 0, live: 0, published: 0 },
+  isHardwareConnected = true,
+  onOpenHardwareModal,
   onSelectElection,
   onNavigateToElections,
   onOpenCreateModal

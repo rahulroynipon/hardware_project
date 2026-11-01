@@ -9,7 +9,8 @@ export default function HardwareModal({
   setIsTestMode,
   liveElection,
   publishedElection,
-  lastHardwareEvent
+  lastHardwareEvent,
+  onNavigateToInstructions
 }) {
   const [loadingSlot, setLoadingSlot] = useState(null);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -80,12 +81,12 @@ export default function HardwareModal({
     if (action === 'VOTE_CAST') {
       const slot = (lastHardwareEvent.slot || 'A').toUpperCase();
       setGreenBlink(true);
-      setTimeout(() => setGreenBlink(false), 120);
+      setTimeout(() => setGreenBlink(false), 500);
       triggerTempMessage('Vote Recorded', `Candidate ${slot}`, 800);
     } else if (action === 'TEST_VOTE') {
       const slot = (lastHardwareEvent.slot || 'A').toUpperCase();
       setGreenBlink(true);
-      setTimeout(() => setGreenBlink(false), 120);
+      setTimeout(() => setGreenBlink(false), 500);
       triggerTempMessage('Test Vote Rec.', `Candidate ${slot}`, 800);
       setTestTallies((prev) => ({
         ...prev,
@@ -165,6 +166,14 @@ export default function HardwareModal({
       return {
         row0: pad16(tempMessage.row0),
         row1: pad16(tempMessage.row1)
+      };
+    }
+
+    // 0.5. Disconnected State: show "PLEASE CONNECT / VOTING MACHINE"
+    if (!isHardwareConnected) {
+      return {
+        row0: pad16('PLEASE CONNECT'),
+        row1: pad16('VOTING MACHINE')
       };
     }
 
@@ -309,7 +318,7 @@ export default function HardwareModal({
 
     setLoadingSlot(slot);
     setGreenBlink(true);
-    setTimeout(() => setGreenBlink(false), 120);
+    setTimeout(() => setGreenBlink(false), 500);
     triggerTempMessage('Test Vote Rec.', `Candidate ${slot}`, 800);
 
     // In Test Mode: Increment local test tallies ONLY, do NOT record to official PostgreSQL database
@@ -410,178 +419,169 @@ export default function HardwareModal({
         <button className="modal-close-btn" onClick={onClose}>&times;</button>
         <h2 className="modal-title" style={{ marginBottom: '14px' }}>Hardware Console & Bridge</h2>
 
-        {/* HARDWARE DISCONNECTED BANNER */}
-        {!isHardwareConnected && (
+        {/* IF DISCONNECTED: SHOW ONLY "PLEASE CONNECT THE VOTING MACHINE" */}
+        {!isHardwareConnected ? (
           <div
             style={{
-              marginBottom: '14px',
-              padding: '12px 16px',
-              borderRadius: '10px',
-              background: '#FEF2F2',
-              border: '1.5px solid #FCA5A5',
+              padding: '44px 20px',
+              textAlign: 'center',
               display: 'flex',
+              flexDirection: 'column',
               alignItems: 'center',
-              gap: '12px',
-              color: '#991B1B'
+              gap: '12px'
             }}
           >
-            <span style={{ fontSize: '24px' }}>⚠️</span>
-            <div>
-              <div style={{ fontWeight: 800, fontSize: '14px', color: '#991B1B' }}>
-                Please Connect the Hardware
-              </div>
-              <div style={{ fontSize: '12px', color: '#B91C1C', marginTop: '2px', lineHeight: '1.4' }}>
-                Arduino Uno hardware voting machine is not connected. Please connect the hardware via USB to enable physical voting and state synchronization.
-              </div>
+            <div style={{ fontSize: '52px', lineHeight: 1, marginBottom: '4px' }}>🔌</div>
+            <h3 style={{ margin: 0, fontSize: '20px', fontWeight: 800, color: '#0F172A' }}>
+              Please Connect the Voting Machine
+            </h3>
+            <p style={{ margin: 0, fontSize: '13px', color: '#64748B', maxWidth: '380px', lineHeight: 1.5 }}>
+              The Arduino Uno voting machine is not detected on USB. Please plug in the physical voting machine to view hardware controls and choices.
+            </p>
+            <div style={{ display: 'flex', gap: '10px', marginTop: '14px' }}>
+              <button className="btn-primary" onClick={onClose}>
+                Close
+              </button>
             </div>
           </div>
-        )}
+        ) : (
+          <>
 
-        {/* CONNECTION & PHYSICAL LEDS IN-LINE STATUS */}
+        {/* COMPACT MINIMAL HARDWARE STATUS & CONTROL STRIP */}
         <div
           style={{
-            marginBottom: '14px',
-            padding: '12px 14px',
-            borderRadius: 'var(--radius-sm)',
-            background: isHardwareConnected ? '#F0FDF4' : '#FEF2F2',
-            border: `1px solid ${isHardwareConnected ? '#BBF7D0' : '#FECACA'}`,
+            marginBottom: '12px',
+            padding: '8px 12px',
+            borderRadius: '8px',
+            background: isHardwareConnected ? '#F8FAFC' : '#FEF2F2',
+            border: `1px solid ${isHardwareConnected ? '#E2E8F0' : '#FECACA'}`,
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
             flexWrap: 'wrap',
-            gap: '10px'
+            gap: '8px'
           }}
         >
-          {/* Bridge Status */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span className="pulse-dot" style={{ background: isHardwareConnected ? '#10B981' : '#EF4444' }}></span>
-            <span style={{ fontSize: '12px', fontWeight: 700, color: isHardwareConnected ? '#065F46' : '#991B1B' }}>
-              {isHardwareConnected
-                ? '🟢 Arduino Uno Connected (/dev/cu.usbmodem11201)'
-                : '⚠️ Please connect the hardware (Arduino Uno not detected)'}
-            </span>
-          </div>
-
-          {/* PHYSICAL ARDUINO HARDWARE LEDS (PINS 13 & 12) */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-            {/* Green LED (Pin 13) */}
+          {/* Left: Connection & LEDs */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            {/* Port Connection */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <span
+                className="pulse-dot"
                 style={{
-                  width: '12px',
-                  height: '12px',
-                  borderRadius: '50%',
-                  background: (isGreenLedLit && !greenBlink) ? '#22C55E' : '#14532D',
-                  boxShadow: (isGreenLedLit && !greenBlink)
-                    ? '0 0 10px #22C55E, inset 0 1px 2px rgba(255,255,255,0.7)'
-                    : 'inset 0 1px 2px rgba(0,0,0,0.6)',
-                  border: '1px solid #166534',
-                  transition: 'all 0.1s ease'
+                  width: '8px',
+                  height: '8px',
+                  background: isHardwareConnected ? '#10B981' : '#EF4444'
                 }}
-              ></span>
-              <span style={{ fontSize: '11px', fontWeight: 700, color: (isGreenLedLit && !greenBlink) ? '#15803D' : '#64748B' }}>
-                Green LED (Pin 13): {(isGreenLedLit && !greenBlink) ? 'ON' : 'OFF'}
+              />
+              <span style={{ fontSize: '11px', fontWeight: 700, color: '#1E293B' }}>
+                {isHardwareConnected ? 'Arduino Online' : 'Hardware Disconnected'}
+              </span>
+              {isHardwareConnected && (
+                <span style={{ fontSize: '10px', color: '#64748B', fontFamily: 'monospace' }}>
+                  (/dev/cu.usbmodem11201)
+                </span>
+              )}
+            </div>
+
+            {/* Divider */}
+            <span style={{ width: '1px', height: '14px', background: '#CBD5E1' }}></span>
+
+            {/* Green LED (Pin 13) */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <div
+                style={{
+                  width: '11px',
+                  height: '11px',
+                  borderRadius: '50%',
+                  background: greenBlink ? '#4ADE80' : isGreenLedLit ? '#22C55E' : '#064E3B',
+                  boxShadow: greenBlink
+                    ? '0 0 12px #22C55E, 0 0 20px #4ADE80'
+                    : isGreenLedLit
+                    ? '0 0 8px #22C55E'
+                    : 'none',
+                  border: `1.5px solid ${greenBlink ? '#86EFAC' : isGreenLedLit ? '#16A34A' : '#022C22'}`,
+                  transition: 'all 0.15s ease'
+                }}
+              />
+              <span style={{ fontSize: '11px', color: greenBlink ? '#15803D' : isGreenLedLit ? '#15803D' : '#64748B' }}>
+                Pin 13 (Green): <strong style={{ fontWeight: 800 }}>{greenBlink ? '⚡ BLINK' : isGreenLedLit ? 'ON' : 'OFF'}</strong>
               </span>
             </div>
 
             {/* Red LED (Pin 12) */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span
+              <div
                 style={{
-                  width: '12px',
-                  height: '12px',
+                  width: '11px',
+                  height: '11px',
                   borderRadius: '50%',
-                  background: isRedLedLit ? '#EF4444' : '#7F1D1D',
-                  boxShadow: isRedLedLit
-                    ? '0 0 10px #EF4444, inset 0 1px 2px rgba(255,255,255,0.7)'
-                    : 'inset 0 1px 2px rgba(0,0,0,0.6)',
-                  border: '1px solid #991B1B',
-                  transition: 'all 0.1s ease'
+                  background: isRedLedLit ? '#EF4444' : '#450A0A',
+                  boxShadow: isRedLedLit ? '0 0 8px #EF4444' : 'none',
+                  border: `1.5px solid ${isRedLedLit ? '#B91C1C' : '#2D0606'}`,
+                  transition: 'all 0.15s ease'
                 }}
-              ></span>
-              <span style={{ fontSize: '11px', fontWeight: 700, color: isRedLedLit ? '#B91C1C' : '#64748B' }}>
-                Red LED (Pin 12): {isRedLedLit ? 'ON' : 'OFF'}
+              />
+              <span style={{ fontSize: '11px', color: isRedLedLit ? '#B91C1C' : '#64748B' }}>
+                Pin 12 (Red): <strong style={{ fontWeight: 800 }}>{isRedLedLit ? 'ON' : 'OFF'}</strong>
               </span>
             </div>
           </div>
-        </div>
 
-        {/* TEST MODE VS LIVE VOTING MODE SELECTOR */}
-        <div
-          style={{
-            marginBottom: '16px',
-            padding: '12px 16px',
-            borderRadius: '10px',
-            background: isTestMode ? '#FFFBEB' : '#F8FAFC',
-            border: `1.5px solid ${isTestMode ? '#F59E0B' : '#CBD5E1'}`,
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap',
-            gap: '12px'
-          }}
-        >
-          <div style={{ flex: 1, minWidth: '220px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '16px' }}>{isTestMode ? '🧪' : '🗳️'}</span>
-              <span style={{ fontSize: '13px', fontWeight: 800, color: isTestMode ? '#92400E' : '#0F172A' }}>
-                {isTestMode ? 'Hardware Test Mode' : 'Live Voting Mode'}
-              </span>
-              <span
-                style={{
-                  fontSize: '10px',
-                  fontWeight: 800,
-                  padding: '2px 8px',
-                  borderRadius: '999px',
-                  background: isTestMode ? '#FEF3C7' : '#E2E8F0',
-                  color: isTestMode ? '#B45309' : '#475569',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.04em'
-                }}
-              >
-                {isTestMode ? 'SIMULATION' : 'HARDWARE ONLY'}
-              </span>
-            </div>
-            <div style={{ fontSize: '11px', color: isTestMode ? '#B45309' : '#64748B', marginTop: '3px' }}>
-              {isTestMode
-                ? 'Web voting enabled for testing. Votes are simulated and NOT recorded in the official database.'
-                : 'Web voting disabled. Official votes are only accepted from physical Arduino hardware buttons (Pins D3–D6).'}
-            </div>
+          {/* Right: Election State & Compact Mode Switcher */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            {/* Election State Badge */}
+            <span
+              style={{
+                fontSize: '10px',
+                fontWeight: 800,
+                padding: '2px 8px',
+                borderRadius: '4px',
+                background: isVoting ? '#DCFCE7' : isPublished ? '#FEE2E2' : '#F1F5F9',
+                color: isVoting ? '#15803D' : isPublished ? '#B91C1C' : '#475569',
+                border: `1px solid ${isVoting ? '#86EFAC' : isPublished ? '#FCA5A5' : '#CBD5E1'}`
+              }}
+            >
+              {isVoting ? '🟢 VOTING' : isPublished ? '🔴 CLOSED' : '⚪ STANDBY'}
+            </span>
+
+            {/* Compact Mode Switcher Button */}
+            <button
+              type="button"
+              style={{
+                padding: '3px 10px',
+                fontSize: '11px',
+                fontWeight: 700,
+                borderRadius: '6px',
+                cursor: 'pointer',
+                background: isTestMode ? '#FEF3C7' : '#EFF6FF',
+                color: isTestMode ? '#92400E' : '#1D4ED8',
+                border: `1px solid ${isTestMode ? '#F59E0B' : '#93C5FD'}`,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                transition: 'all 0.15s ease'
+              }}
+              onClick={async () => {
+                const next = !isTestMode;
+                if (setIsTestMode) setIsTestMode(next);
+                triggerTempMessage('MODE SWITCHED', next ? 'TEST MODE ON' : 'LIVE VOTING ON', 2500);
+                try {
+                  const tallies = [testTallies.A || 0, testTallies.B || 0, testTallies.C || 0, testTallies.D || 0];
+                  await setHardwareTestMode(next, {
+                    tallies,
+                    state: machineMode,
+                    candidateCount: 4
+                  });
+                } catch (e) {
+                  console.warn('[SET TEST MODE ERR]', e);
+                }
+              }}
+            >
+              <span>{isTestMode ? '🧪 Test Mode: ON' : '🗳️ Live Mode: ON'}</span>
+              <span style={{ fontSize: '9px', opacity: 0.75 }}>(Click to switch)</span>
+            </button>
           </div>
-
-          <button
-            type="button"
-            className="btn-outline"
-            style={{
-              padding: '7px 14px',
-              fontSize: '12px',
-              fontWeight: 800,
-              borderRadius: '8px',
-              cursor: 'pointer',
-              background: isTestMode ? '#F59E0B' : '#FFFFFF',
-              color: isTestMode ? '#FFFFFF' : '#1E293B',
-              borderColor: isTestMode ? '#D97706' : '#94A3B8',
-              boxShadow: isTestMode ? '0 2px 6px rgba(245, 158, 11, 0.3)' : 'none',
-              transition: 'all 0.15s ease'
-            }}
-            onClick={async () => {
-              const next = !isTestMode;
-              if (setIsTestMode) setIsTestMode(next);
-              triggerTempMessage('MODE SWITCHED', next ? 'TEST MODE ON' : 'LIVE VOTING ON', 2500);
-              try {
-                const tallies = [testTallies.A || 0, testTallies.B || 0, testTallies.C || 0, testTallies.D || 0];
-                await setHardwareTestMode(next, {
-                  tallies,
-                  state: machineMode,
-                  candidateCount: 4
-                });
-              } catch (e) {
-                console.warn('[SET TEST MODE ERR]', e);
-              }
-            }}
-          >
-            {isTestMode ? '✓ Test Mode ON' : '🧪 Turn On Test Mode'}
-          </button>
         </div>
 
         {/* REAL-TIME 1602 LCD SIMULATOR (I2C 0X27) */}
@@ -691,87 +691,87 @@ export default function HardwareModal({
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
-            {['A', 'B', 'C', 'D'].map((slot, idx) => {
-              const activeSource = isVoting ? liveElection : (publishedElection || liveElection);
-              const cand = activeSource?.candidates?.find(
-                (c) => (c.slot || '').toUpperCase() === slot.toUpperCase()
-              );
-              const activeCount = isVoting
-                ? (liveElection?.candidates?.length || 4)
-                : isPublished
-                ? (publishedElection?.candidates?.length || 4)
-                : 4;
-              const isDisabled = !isPublished && !isStandby && idx >= activeCount;
-              const isButtonDisabled = !isTestMode || isDisabled || loadingSlot === slot || isPublished || isStandby;
+                {['A', 'B', 'C', 'D'].map((slot, idx) => {
+                  const activeSource = isVoting ? liveElection : (publishedElection || liveElection);
+                  const cand = activeSource?.candidates?.find(
+                    (c) => (c.slot || '').toUpperCase() === slot.toUpperCase()
+                  );
+                  const activeCount = isVoting
+                    ? (liveElection?.candidates?.length || 4)
+                    : isPublished
+                    ? (publishedElection?.candidates?.length || 4)
+                    : 4;
+                  const isDisabled = !isPublished && !isStandby && idx >= activeCount;
+                  const isButtonDisabled = !isTestMode || isDisabled || loadingSlot === slot || isPublished || isStandby;
 
-              return (
-                <button
-                  key={slot}
-                  className="btn-outline"
-                  style={{
-                    padding: '12px 8px',
-                    fontWeight: 800,
-                    fontSize: '14px',
-                    cursor: isButtonDisabled ? 'not-allowed' : 'pointer',
-                    borderColor: !isTestMode
-                      ? '#E2E8F0'
-                      : isDisabled
-                      ? '#CBD5E1'
-                      : isPublished
-                      ? '#FCA5A5'
-                      : '#F59E0B',
-                    background: !isTestMode
-                      ? '#F8FAFC'
-                      : isPublished
-                      ? '#FEF2F2'
-                      : '#FFFDF5',
-                    opacity: isButtonDisabled ? 0.55 : 1,
-                    transition: 'all 0.1s ease'
-                  }}
-                  disabled={isButtonDisabled}
-                  title={
-                    !isTestMode
-                      ? 'Voting buttons are disabled in Live Voting Mode. Cast votes using physical Arduino hardware buttons (Pins D3–D6).'
-                      : isStandby
-                      ? 'Voting has not started'
-                      : isPublished
-                      ? 'Voting is closed'
-                      : isDisabled
-                      ? 'Slot disabled'
-                      : `Click to test simulated vote for Candidate ${slot}`
-                  }
-                  onClick={() => handleSimulateVote(slot)}
-                >
-                  {loadingSlot === slot
-                    ? '...'
-                    : `Btn ${slot} (D${idx + 3})`}
-                  <span
-                    style={{
-                      display: 'block',
-                      fontSize: '10px',
-                      color: !isTestMode
-                        ? '#64748B'
-                        : isPublished
-                        ? '#DC2626'
-                        : '#B45309',
-                      fontWeight: 600,
-                      marginTop: '2px'
-                    }}
-                  >
-                    {!isTestMode
-                      ? '🔒 Hardware Only'
-                      : isStandby
-                      ? `Slot ${slot}`
-                      : isPublished
-                      ? 'Voting Closed'
-                      : idx >= activeCount
-                      ? 'Disabled'
-                      : `🧪 ${testTallies[slot] || 0} test votes`}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+                  return (
+                    <button
+                      key={slot}
+                      className="btn-outline"
+                      style={{
+                        padding: '12px 8px',
+                        fontWeight: 800,
+                        fontSize: '14px',
+                        cursor: isButtonDisabled ? 'not-allowed' : 'pointer',
+                        borderColor: !isTestMode
+                          ? '#E2E8F0'
+                          : isDisabled
+                          ? '#CBD5E1'
+                          : isPublished
+                          ? '#FCA5A5'
+                          : '#F59E0B',
+                        background: !isTestMode
+                          ? '#F8FAFC'
+                          : isPublished
+                          ? '#FEF2F2'
+                          : '#FFFDF5',
+                        opacity: isButtonDisabled ? 0.55 : 1,
+                        transition: 'all 0.1s ease'
+                      }}
+                      disabled={isButtonDisabled}
+                      title={
+                        !isTestMode
+                          ? 'Voting buttons are disabled in Live Voting Mode. Cast votes using physical Arduino hardware buttons (Pins D3–D6).'
+                          : isStandby
+                          ? 'Voting has not started'
+                          : isPublished
+                          ? 'Voting is closed'
+                          : isDisabled
+                          ? 'Slot disabled'
+                          : `Click to test simulated vote for Candidate ${slot}`
+                      }
+                      onClick={() => handleSimulateVote(slot)}
+                    >
+                      {loadingSlot === slot
+                        ? '...'
+                        : `Btn ${slot} (D${idx + 3})`}
+                      <span
+                        style={{
+                          display: 'block',
+                          fontSize: '10px',
+                          color: !isTestMode
+                            ? '#64748B'
+                            : isPublished
+                            ? '#DC2626'
+                            : '#B45309',
+                          fontWeight: 600,
+                          marginTop: '2px'
+                        }}
+                      >
+                        {!isTestMode
+                          ? '🔒 Hardware Only'
+                          : isStandby
+                          ? `Slot ${slot}`
+                          : isPublished
+                          ? 'Voting Closed'
+                          : idx >= activeCount
+                          ? 'Disabled'
+                          : `🧪 ${testTallies[slot] || 0} test votes`}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
         </div>
 
         {/* CONTROL PIN 7 HARDWARE ACTIONS */}
@@ -874,41 +874,38 @@ export default function HardwareModal({
             </button>
           </div>
 
-          <div
-            style={{
-              marginTop: '10px',
-              padding: '10px 14px',
-              borderRadius: '8px',
-              background: '#F8FAFC',
-              border: '1px solid #E2E8F0',
-              fontSize: '11px',
-              color: '#475569',
-              lineHeight: 1.5,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '4px'
-            }}
-          >
-            <div>
-              <strong>🔄 Dual-Display Synchronization:</strong> Displays <em>"HARDWARE SYNCING / PLEASE WAIT..."</em> on both the physical 1602 LCD and web console during sync.
-            </div>
-            <div>
-              • <strong>Live Voting Mode:</strong> Syncs physical Arduino with live database election tallies.
-            </div>
-            <div>
-              • <strong>Test Mode:</strong> Syncs physical Arduino directly with <u>Hardware Modal simulated test tallies</u> (does NOT alter or read from the official database).
-            </div>
-            <div style={{ marginTop: '3px', color: '#0F172A', fontWeight: 700 }}>
-              💡 <strong>Physical Hardware Shortcuts:</strong> Press the <u>last 2 buttons together</u> (Btn D &amp; Pin 7 Control, Pins 6 &amp; 7) to switch mode (Test ↔ Live). Hold both for <u>2–3 seconds</u> to trigger Hardware Sync!
-            </div>
-          </div>
         </div>
 
-        <div style={{ textAlign: 'right' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px', paddingTop: '12px', borderTop: '1px solid #E2E8F0' }}>
+          {onNavigateToInstructions ? (
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                onNavigateToInstructions();
+              }}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: '#2563EB',
+                fontSize: '12px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                padding: 0,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px'
+              }}
+            >
+              📖 View Complete Hardware Instructions &amp; Guide &rarr;
+            </button>
+          ) : <div />}
           <button className="btn-primary" onClick={onClose}>
             Close Console
           </button>
         </div>
+          </>
+        )}
       </div>
     </div>
   );

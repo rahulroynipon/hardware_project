@@ -14,7 +14,7 @@ export default function Header({ currentView, setCurrentView, isHardwareConnecte
         </div>
       </div>
 
-      {/* Main Navigation: Exactly 2 Tabs (Dashboard & Elections) */}
+      {/* Main Navigation: Dashboard, Elections, Instructions */}
       <nav className="nav-tabs-pill">
         <button
           className={`nav-tab-btn ${currentView === 'dashboard' ? 'active' : ''}`}
@@ -27,6 +27,12 @@ export default function Header({ currentView, setCurrentView, isHardwareConnecte
           onClick={() => setCurrentView('elections')}
         >
           Elections
+        </button>
+        <button
+          className={`nav-tab-btn ${currentView === 'instructions' ? 'active' : ''}`}
+          onClick={() => setCurrentView('instructions')}
+        >
+          Instructions
         </button>
       </nav>
 

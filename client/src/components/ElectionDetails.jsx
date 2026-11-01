@@ -29,6 +29,8 @@ ChartJS.register(
 
 export default function ElectionDetails({
   election,
+  isHardwareConnected = true,
+  onOpenHardwareModal,
   onBack,
   onStartLive,
   onPublish,

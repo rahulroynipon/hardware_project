@@ -427,9 +427,15 @@ void castVote(byte candidate, bool isRemote) {
   // Test Mode Guard: In test mode, visually simulate vote, blink LED, but do NOT increment persistent votes
   if (isHardwareTestModeActive) {
     digitalWrite(redLED, LOW);
-    digitalWrite(greenLED, LOW);
-    delay(120);
-    digitalWrite(greenLED, (machineState == STATE_VOTING) ? HIGH : LOW);
+    if (machineState == STATE_VOTING) {
+      digitalWrite(greenLED, LOW);
+      delay(200);
+      digitalWrite(greenLED, HIGH);
+    } else {
+      digitalWrite(greenLED, HIGH);
+      delay(300);
+      digitalWrite(greenLED, LOW);
+    }
 
     char candName = candidateNames[candidate];
     logEvent("TEST_VOTE", candName, "TestVoteSimulated");
@@ -447,9 +453,15 @@ void castVote(byte candidate, bool isRemote) {
 
   // Green LED blinks to visually confirm vote recorded:
   digitalWrite(redLED, LOW);
-  digitalWrite(greenLED, LOW);
-  delay(120);
-  digitalWrite(greenLED, HIGH);
+  if (machineState == STATE_VOTING) {
+    digitalWrite(greenLED, LOW);
+    delay(200);
+    digitalWrite(greenLED, HIGH);
+  } else {
+    digitalWrite(greenLED, HIGH);
+    delay(300);
+    digitalWrite(greenLED, LOW);
+  }
 
   if (isRemote) {
     logEvent("REMOTE_VOTE", candidateNames[candidate], "RemoteVoteRecorded");

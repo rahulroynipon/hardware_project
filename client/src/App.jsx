@@ -5,6 +5,7 @@ import ElectionsList from './components/ElectionsList';
 import ElectionDetails from './components/ElectionDetails';
 import CreateElectionModal from './components/CreateElectionModal';
 import HardwareModal from './components/HardwareModal';
+import InstructionsGuide from './components/InstructionsGuide';
 import {
   fetchElections,
   createElection,
@@ -215,6 +216,8 @@ export default function App() {
           <Dashboard
             elections={elections}
             counts={counts}
+            isHardwareConnected={isHardwareConnected}
+            onOpenHardwareModal={() => setIsHardwareModalOpen(true)}
             onSelectElection={(id) => {
               setSelectedElectionId(id);
               setCurrentView('details');
@@ -239,6 +242,8 @@ export default function App() {
         {currentView === 'details' && (
           <ElectionDetails
             election={selectedElection || liveElection}
+            isHardwareConnected={isHardwareConnected}
+            onOpenHardwareModal={() => setIsHardwareModalOpen(true)}
             onBack={() => {
               setCurrentView('elections');
               setSelectedElectionId(null);
@@ -246,6 +251,15 @@ export default function App() {
             onStartLive={handleStartLive}
             onPublish={handlePublish}
             onDelete={handleDelete}
+          />
+        )}
+
+        {currentView === 'instructions' && (
+          <InstructionsGuide
+            isHardwareConnected={isHardwareConnected}
+            onOpenHardwareModal={() => setIsHardwareModalOpen(true)}
+            onNavigateToCreate={() => setIsCreateModalOpen(true)}
+            onNavigateToDashboard={() => setCurrentView('dashboard')}
           />
         )}
       </main>
@@ -267,6 +281,7 @@ export default function App() {
         liveElection={liveElection}
         publishedElection={selectedElection?.status === 'published' ? selectedElection : elections.find((e) => e.status === 'published')}
         lastHardwareEvent={lastHardwareEvent}
+        onNavigateToInstructions={() => setCurrentView('instructions')}
       />
 
       {/* Floating Hardware Disconnect / Reconnect Side Modal Alert */}
